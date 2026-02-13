@@ -28,7 +28,7 @@ chrono.workspace = true
 regex = "1.10"
 secrecy = "0.10"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-dirs = "5.0"
+dirs = "6.0"
 
 # Database (Tauri SQL plugin)
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
