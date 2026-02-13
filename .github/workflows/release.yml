@@ -18,7 +18,7 @@ jobs:
     outputs:
       body: ${{ steps.changelog.outputs.body }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -28,7 +28,7 @@ jobs:
           toolchain: 1.85
 
       - name: Cache cargo bin
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
           key: ${{ runner.os }}-cargo-bin-git-cliff
@@ -59,10 +59,10 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -99,7 +99,7 @@ jobs:
 
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
           key: ${{ runner.os }}-vcpkg-tesseract-leptonica-v1
