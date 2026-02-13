@@ -26,8 +26,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85
+          toolchain: stable
           components: clippy, rustfmt
+
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-deps-v1
 
       - name: Install system dependencies
         run: |
@@ -47,6 +53,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          shared-key: ubuntu-rust
 
       - name: Check formatting
         run: cargo fmt -- --check
@@ -115,8 +122,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85
+          toolchain: stable
           targets: x86_64-unknown-linux-gnu
+
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-deps-v1
 
       - name: Install system dependencies
         run: |
@@ -136,6 +149,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          shared-key: ubuntu-rust
 
       - name: Cache cargo bin
         uses: actions/cache@v4

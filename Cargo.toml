@@ -15,5 +15,5 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 thiserror = "1.0"
 
 [profile.release]
-lto = true
+lto = "thin"
 strip = true

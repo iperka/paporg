@@ -16,38 +16,46 @@ jobs:
     name: Generate release notes
     runs-on: ubuntu-latest
     outputs:
-      body: ${{ steps.changelog.outputs.body }}
+      body: ${{ steps.changelog.outputs.content }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.85
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: ${{ runner.os }}-cargo-bin-git-cliff
-
-      - name: Install git-cliff
-        run: command -v git-cliff || cargo install git-cliff --locked
-
       - name: Generate release notes
         id: changelog
-        run: |
-          git-cliff --current --config cliff.toml > /tmp/RELEASE_NOTES.md
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          cat /tmp/RELEASE_NOTES.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --current
+
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies and build
+        run: cd web && npm ci && npm run build
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist
+          retention-days: 1
 
   build:
     name: Build and publish
     runs-on: ${{ matrix.os }}
-    needs: release-notes
+    needs: [release-notes, frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -61,21 +69,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install frontend dependencies
-        run: cd web && npm ci
+          name: frontend-dist
+          path: web/dist
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85
+          toolchain: stable
           targets: ${{ matrix.target }}
+
+      - name: Cache apt archives (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-deps-v1
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -91,6 +102,13 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev
+
+      - name: Cache Homebrew downloads (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: ${{ runner.os }}-brew-tesseract-leptonica-v1
 
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
@@ -128,4 +146,4 @@ jobs:
           releaseBody: ${{ needs.release-notes.outputs.body }}
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --config '{"build":{"beforeBuildCommand":""}}'
