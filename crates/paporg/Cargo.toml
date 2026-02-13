@@ -32,7 +32,7 @@ num_cpus = "1.16"
 
 # Directory scanning & watching
 walkdir = "2.5"
-notify = "6.1"
+notify = "8.2"
 notify-debouncer-mini = "0.4"
 glob = "0.3"
 
