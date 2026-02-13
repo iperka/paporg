@@ -71,7 +71,7 @@ llama-cpp-2 = { version = "0.1", optional = true }
 hf-hub = { version = "0.4", optional = true }
 
 # Email import source
-async-imap = "0.10"
+async-imap = "0.11"
 async-native-tls = "0.5"
 async-io = "2.3"
 mail-parser = "0.9"
