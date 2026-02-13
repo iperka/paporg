@@ -4276,7 +4276,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger",
  "futures-util",
- "getrandom 0.2.17",
+ "getrandom 0.4.1",
  "glob",
  "hf-hub",
  "image",

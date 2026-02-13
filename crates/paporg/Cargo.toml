@@ -83,7 +83,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
 # Token encryption (^0.10.3 for RUSTSEC-2023-0096 fix, bounded to 0.10.x)
 aes-gcm = "^0.10.3"
-getrandom = "0.2"
+getrandom = "0.4"
 
 # TTL cache for pending OAuth authorizations
 moka = { version = "0.12", features = ["sync"] }
