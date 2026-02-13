@@ -1,0 +1,9 @@
+apiVersion: paporg.io/v1
+kind: Settings
+metadata:
+  name: default
+spec:
+  inputDirectory: /data/inbox
+  outputDirectory: /data/documents
+  # Invalid YAML - unclosed bracket
+  workerCount: [4

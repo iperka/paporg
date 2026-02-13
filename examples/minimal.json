@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "input_directory": "~/Desktop/globtim/2026/",
+  "output_directory": "./documents",
+  "worker_count": 10,
+  "ocr": {
+    "enabled": true,
+    "languages": [
+      "eng"
+    ],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": []
+  },
+  "rules": [
+    {
+      "id": "rule-1769637420412",
+      "name": "New Rule",
+      "priority": 1,
+      "match": {
+        "contains": null,
+        "containsAny": [
+          "Globtim"
+        ],
+        "containsAll": null,
+        "pattern": null
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "$y",
+        "filename": "$original"
+      },
+      "symlinks": []
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "$y/unsorted",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

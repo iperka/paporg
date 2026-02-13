@@ -1,0 +1,24 @@
+================================
+        RECEIPT
+================================
+
+Store: TechMart Electronics
+Date: 2026-01-20
+Transaction ID: TRX-98765
+
+Items Purchased:
+1x USB-C Cable          $15.99
+2x Screen Protector     $19.98
+1x Phone Case           $29.99
+
+--------------------------------
+Subtotal:               $65.96
+Tax:                    $5.28
+--------------------------------
+TOTAL:                  $71.24
+
+Payment Method: Credit Card
+Card ending in: ****4242
+
+Thank you for shopping with us!
+================================

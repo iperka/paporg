@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "input_directory": "/input",
+  "output_directory": "/output",
+  "worker_count": 4,
+  "ocr": {
+    "enabled": true,
+    "languages": ["eng", "deu"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "vendor",
+        "pattern": "(?i)(?:from|invoice from)[:\\s]+(?P<vendor>[A-Za-z0-9\\s&.-]{2,50})",
+        "transform": "slugify",
+        "default": "unknown"
+      },
+      {
+        "name": "invoice_number",
+        "pattern": "(?i)(?:invoice|inv)[\\s#:]*(?P<invoice_number>[A-Z0-9-]{4,20})"
+      },
+      {
+        "name": "amount",
+        "pattern": "(?i)(?:total|amount)[:\\s]*(?:CHF|EUR|USD)?\\s*(?P<amount>[0-9,.]+)"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "tax-invoice",
+      "name": "Tax-Deductible Invoices",
+      "priority": 100,
+      "match": {
+        "all": [
+          { "containsAny": ["invoice", "rechnung", "Invoice", "INVOICE"] },
+          { "containsAny": ["MwSt", "VAT", "tax", "TVA"] }
+        ]
+      },
+      "category": "tax-invoice",
+      "output": {
+        "directory": "$y/invoices/tax",
+        "filename": "$vendor_$y-$m-$d_$invoice_number"
+      },
+      "symlinks": [
+        { "target": "taxes/$y" }
+      ]
+    },
+    {
+      "id": "general-invoice",
+      "name": "General Invoices",
+      "priority": 50,
+      "match": {
+        "containsAny": ["invoice", "rechnung", "bill", "facture"]
+      },
+      "category": "invoice",
+      "output": {
+        "directory": "$y/invoices",
+        "filename": "$vendor_$y-$m-$d"
+      }
+    },
+    {
+      "id": "contract",
+      "name": "Contracts",
+      "priority": 75,
+      "match": {
+        "containsAny": ["contract", "agreement", "vertrag"]
+      },
+      "category": "contract",
+      "output": {
+        "directory": "$y/contracts",
+        "filename": "$vendor_$original"
+      }
+    },
+    {
+      "id": "bank-statement",
+      "name": "Bank Statements",
+      "priority": 80,
+      "match": {
+        "all": [
+          { "containsAny": ["bank", "account", "konto"] },
+          { "containsAny": ["statement", "auszug", "balance"] }
+        ]
+      },
+      "category": "bank",
+      "output": {
+        "directory": "$y/bank",
+        "filename": "$y-$m-$d_statement"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "$y/unsorted",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

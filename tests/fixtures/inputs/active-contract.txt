@@ -1,0 +1,37 @@
+SERVICE AGREEMENT
+
+Contract Number: 2026-SVC-001
+Effective Date: January 1, 2026
+Expiration Date: December 31, 2026
+
+PARTIES:
+Provider: TechServices Inc.
+Client: Enterprise Solutions Ltd.
+
+AGREEMENT TERMS:
+
+This Agreement is entered into as of the date first written above.
+
+1. SERVICES
+   Provider agrees to deliver the following services:
+   - Software maintenance
+   - Technical support
+   - System updates
+
+2. COMPENSATION
+   Client agrees to pay Provider $50,000.00 annually.
+
+3. TERM
+   This Contract shall remain in effect for one (1) year.
+
+4. TERMINATION
+   Either party may terminate with 30 days written notice.
+
+SIGNATURES:
+
+_____________________    _____________________
+Provider                  Client
+Date: 2026-01-01         Date: 2026-01-01
+
+Status: ACTIVE
+Document ID: DOC-2026-001

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paporg - Document Processing Configuration</title>
+  </head>
+  <body>
+    <script>
+      (function() {
+        const stored = localStorage.getItem('paporg-theme');
+        const theme = stored === 'light' || stored === 'dark' ? stored : null;
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.add(theme || (systemDark ? 'dark' : 'light'));
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

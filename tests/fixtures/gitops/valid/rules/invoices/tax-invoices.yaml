@@ -1,0 +1,24 @@
+apiVersion: paporg.io/v1
+kind: Rule
+metadata:
+  name: tax-invoices
+  labels:
+    category: finance
+    type: tax
+spec:
+  priority: 100
+  category: Tax
+  match:
+    all:
+      - containsAny:
+          - Invoice
+          - Rechnung
+      - containsAny:
+          - VAT
+          - MwSt
+          - USt
+  output:
+    directory: "Tax/$year/Invoices"
+    filename: "$original_$timestamp"
+  symlinks:
+    - target: "ByVendor/$vendor"

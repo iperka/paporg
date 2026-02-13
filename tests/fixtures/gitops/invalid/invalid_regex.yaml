@@ -1,0 +1,6 @@
+apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: bad-regex
+spec:
+  pattern: "[invalid(regex"

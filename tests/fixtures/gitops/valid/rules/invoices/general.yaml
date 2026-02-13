@@ -1,0 +1,18 @@
+apiVersion: paporg.io/v1
+kind: Rule
+metadata:
+  name: general-invoices
+  labels:
+    category: finance
+spec:
+  priority: 50
+  category: Invoices
+  match:
+    containsAny:
+      - Invoice
+      - Rechnung
+      - Bill
+      - Faktura
+  output:
+    directory: "Finance/$year/Invoices"
+    filename: "$original"

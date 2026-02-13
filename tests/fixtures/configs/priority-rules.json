@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "input_directory": "/tmp/paporg-test/input",
+  "output_directory": "/tmp/paporg-test/output",
+  "worker_count": 1,
+  "ocr": {
+    "enabled": false,
+    "languages": ["eng"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": []
+  },
+  "rules": [
+    {
+      "id": "low-priority-invoice",
+      "name": "Low Priority Invoice",
+      "priority": 10,
+      "match": {
+        "contains": "Invoice"
+      },
+      "category": "low-priority",
+      "output": {
+        "directory": "low-priority/$y",
+        "filename": "$original"
+      }
+    },
+    {
+      "id": "high-priority-invoice",
+      "name": "High Priority Invoice",
+      "priority": 100,
+      "match": {
+        "contains": "Invoice"
+      },
+      "category": "high-priority",
+      "output": {
+        "directory": "high-priority/$y",
+        "filename": "$original"
+      }
+    },
+    {
+      "id": "medium-priority-tax",
+      "name": "Medium Priority Tax Invoice",
+      "priority": 50,
+      "match": {
+        "containsAll": ["Invoice", "VAT"]
+      },
+      "category": "tax-invoices",
+      "output": {
+        "directory": "tax/$y",
+        "filename": "$original"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "unsorted/$y",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

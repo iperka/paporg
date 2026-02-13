@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "input_directory": "/tmp/paporg-test/input",
+  "output_directory": "/tmp/paporg-test/output",
+  "worker_count": 1,
+  "ocr": {
+    "enabled": false,
+    "languages": ["eng"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "vendor",
+        "pattern": "(?i)(?:from|invoice from)[:\\s]+(?P<vendor>[A-Za-z0-9\\s&.-]{2,50})",
+        "transform": "slugify",
+        "default": "unknown"
+      },
+      {
+        "name": "invoice_number",
+        "pattern": "(?i)(?:invoice|inv)[\\s#:]*(?P<invoice_number>[A-Z0-9-]{4,20})"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "invoice",
+      "name": "Invoices",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Invoice", "invoice", "INVOICE", "Rechnung"]
+      },
+      "category": "invoices",
+      "output": {
+        "directory": "invoices/$y",
+        "filename": "$vendor_$y-$m-$d"
+      }
+    },
+    {
+      "id": "receipt",
+      "name": "Receipts",
+      "priority": 40,
+      "match": {
+        "containsAny": ["Receipt", "receipt", "RECEIPT", "Quittung"]
+      },
+      "category": "receipts",
+      "output": {
+        "directory": "receipts/$y",
+        "filename": "$original_$y-$m-$d"
+      }
+    },
+    {
+      "id": "contract",
+      "name": "Contracts",
+      "priority": 60,
+      "match": {
+        "containsAny": ["Contract", "contract", "Agreement", "agreement", "Vertrag"]
+      },
+      "category": "contracts",
+      "output": {
+        "directory": "contracts/$y",
+        "filename": "$original"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "unsorted/$y",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+TAX INVOICE
+
+Invoice Number: TAX-2026-0042
+Date: January 28, 2026
+
+From: Global Tech Solutions Ltd.
+VAT Registration: GB123456789
+
+Bill To:
+Enterprise Corp
+456 Business Park
+London, UK
+
+Description                     Qty    Price      Total
+---------------------------------------------------------
+Consulting Services             20     $150.00    $3,000.00
+Software Development            40     $200.00    $8,000.00
+Cloud Infrastructure            1      $500.00    $500.00
+---------------------------------------------------------
+                               Subtotal:          $11,500.00
+                               VAT (20%):         $2,300.00
+                               TOTAL:             $13,800.00
+
+Payment Terms: Net 30 days
+Bank: HSBC UK
+Account: 12345678
+Sort Code: 40-01-02
+
+This is a VAT invoice. Please retain for your tax records.
+MwSt included where applicable.
+
+Thank you for your business!

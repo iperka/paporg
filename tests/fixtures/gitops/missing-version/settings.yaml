@@ -1,0 +1,17 @@
+# Missing apiVersion field
+kind: Settings
+metadata:
+  name: default
+spec:
+  inputDirectory: /data/inbox
+  outputDirectory: /data/documents
+  workerCount: 4
+  ocr:
+    enabled: true
+    languages:
+      - eng
+    dpi: 300
+  defaults:
+    output:
+      directory: "$y/unsorted"
+      filename: "$original"

@@ -1,0 +1,7 @@
+apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: invoice_number
+spec:
+  pattern: "(?i)invoice\\s*#?\\s*(?P<invoice_number>[A-Z0-9-]+)"
+  transform: uppercase

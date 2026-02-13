@@ -1,0 +1,6 @@
+INVOICE AND RECEIPT
+
+This document serves as both an Invoice and a Receipt.
+Transaction completed on January 1, 2099.
+
+Amount: $250.00

@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "input_directory": "/tmp/paporg-test/input",
+  "output_directory": "/tmp/paporg-test/output",
+  "worker_count": 1,
+  "ocr": {
+    "enabled": false,
+    "languages": ["eng"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "vendor",
+        "pattern": "(?i)(?:from|vendor|company)[:\\s]+(?P<vendor>[A-Za-z0-9\\s&.-]{2,50})",
+        "transform": "slugify",
+        "default": "unknown-vendor"
+      },
+      {
+        "name": "invoice_number",
+        "pattern": "(?i)(?:invoice|inv|reference)[\\s#:]*(?P<invoice_number>[A-Z0-9-]{4,20})"
+      },
+      {
+        "name": "amount",
+        "pattern": "(?i)(?:total|amount|sum)[:\\s]*\\$?(?P<amount>[\\d,]+\\.?\\d*)"
+      },
+      {
+        "name": "date",
+        "pattern": "(?i)(?:date)[:\\s]*(?P<date>\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\w+\\s+\\d{1,2},?\\s+\\d{4})"
+      },
+      {
+        "name": "category_hint",
+        "pattern": "(?i)(?:type|category)[:\\s]*(?P<category_hint>\\w+)",
+        "transform": "lowercase"
+      },
+      {
+        "name": "uppercase_code",
+        "pattern": "CODE[:\\s]*(?P<uppercase_code>[a-z]+)",
+        "transform": "uppercase"
+      },
+      {
+        "name": "trimmed_note",
+        "pattern": "NOTE[:\\s]*(?P<trimmed_note>[^\\n]+)",
+        "transform": "trim"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "invoice",
+      "name": "Invoice with Variables",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Invoice", "invoice", "INVOICE"]
+      },
+      "category": "invoices",
+      "output": {
+        "directory": "invoices/$y/$vendor",
+        "filename": "$invoice_number_$y-$m-$d"
+      },
+      "symlinks": [
+        { "target": "by-vendor/$vendor/$invoice_number" },
+        { "target": "latest/$vendor" }
+      ]
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "unsorted/$y",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

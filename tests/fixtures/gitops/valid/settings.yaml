@@ -1,0 +1,29 @@
+apiVersion: paporg.io/v1
+kind: Settings
+metadata:
+  name: default
+  labels: {}
+  annotations: {}
+spec:
+  inputDirectory: /data/inbox
+  outputDirectory: /data/documents
+  workerCount: 4
+  ocr:
+    enabled: true
+    languages:
+      - eng
+      - deu
+    dpi: 300
+  defaults:
+    output:
+      directory: "$y/unsorted"
+      filename: "$original_$timestamp"
+  git:
+    enabled: false
+    repository: ""
+    branch: main
+    syncInterval: 300
+    auth:
+      type: none
+      tokenEnvVar: ""
+      sshKeyPath: ""

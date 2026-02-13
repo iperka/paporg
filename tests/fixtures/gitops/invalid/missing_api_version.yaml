@@ -1,0 +1,11 @@
+kind: Rule
+metadata:
+  name: test
+spec:
+  priority: 0
+  category: Test
+  match:
+    contains: test
+  output:
+    directory: Test
+    filename: test

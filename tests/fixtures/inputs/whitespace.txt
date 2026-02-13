@@ -1,0 +1,8 @@
+# Test fixture: whitespace-only content
+# Tests that the processor correctly handles files containing only whitespace
+# (newlines and spaces) without any meaningful text content.
+# Expected behavior: Should process without errors, extract empty/whitespace text.
+
+
+
+

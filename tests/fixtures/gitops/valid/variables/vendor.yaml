@@ -1,0 +1,8 @@
+apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: vendor
+spec:
+  pattern: "(?i)from[:\\s]+(?P<vendor>[A-Za-z0-9\\s]+)"
+  transform: slugify
+  default: unknown

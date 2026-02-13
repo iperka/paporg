@@ -1,0 +1,31 @@
+INVOICE DOCUMENT
+
+Invoice Number: INV-2026-COMPLEX-001
+Date: January 15, 2026
+
+From: Acme International Corp.
+Vendor: Acme International Corp.
+Company: Acme International Corp.
+
+Reference: REF-ABC-123
+
+Type: Commercial
+Category: Services
+
+Total: $5,750.00
+Amount: $5,750.00
+Sum: $5,750.00
+
+CODE: testcode
+NOTE:   This is a trimmed note with extra spaces
+
+Payment Information:
+Currency: USD
+Amount Due: 5,750.00 USD
+Alternative: 4,800.00 EUR
+British: 4,200.00 GBP
+
+Contract Number: 2026
+Agreement Reference: AGR-2026-001
+
+This document contains multiple variable patterns for testing extraction.

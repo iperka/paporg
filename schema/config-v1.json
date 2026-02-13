@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paporg.example.com/config-v1.json",
+  "title": "Paporg Configuration",
+  "description": "Configuration schema for the Paporg document processing application",
+  "type": "object",
+  "required": ["version", "input_directory", "output_directory"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Configuration schema version"
+    },
+    "input_directory": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory to scan for input documents"
+    },
+    "output_directory": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Directory for processed documents"
+    },
+    "worker_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64,
+      "default": 4,
+      "description": "Number of parallel workers"
+    },
+    "ocr": {
+      "$ref": "#/$defs/ocrConfig"
+    },
+    "variables": {
+      "$ref": "#/$defs/variablesConfig"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      },
+      "description": "Document categorization rules"
+    },
+    "defaults": {
+      "$ref": "#/$defs/defaultsConfig"
+    }
+  },
+  "$defs": {
+    "ocrConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{3}$"
+          },
+          "default": ["eng"]
+        },
+        "dpi": {
+          "type": "integer",
+          "minimum": 72,
+          "maximum": 600,
+          "default": 300
+        }
+      }
+    },
+    "variablesConfig": {
+      "type": "object",
+      "properties": {
+        "extracted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/extractedVariable"
+          }
+        }
+      }
+    },
+    "extractedVariable": {
+      "type": "object",
+      "required": ["name", "pattern"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Variable name (lowercase, alphanumeric with underscores)"
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Regex pattern with named capture group matching the variable name"
+        },
+        "transform": {
+          "type": "string",
+          "enum": ["slugify", "uppercase", "lowercase", "trim"]
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value if pattern doesn't match"
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "required": ["id", "name", "match", "category", "output"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "priority": {
+          "type": "integer",
+          "default": 0
+        },
+        "match": {
+          "$ref": "#/$defs/matchCondition"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output": {
+          "$ref": "#/$defs/outputConfig"
+        },
+        "symlinks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/symlinkConfig"
+          }
+        }
+      }
+    },
+    "matchCondition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/matchCondition"
+              },
+              "minItems": 1
+            }
+          },
+          "required": ["all"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "any": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/matchCondition"
+              },
+              "minItems": 1
+            }
+          },
+          "required": ["any"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/matchCondition"
+            }
+          },
+          "required": ["not"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contains": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["contains"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "containsAny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          },
+          "required": ["containsAny"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "containsAll": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          },
+          "required": ["containsAll"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": ["pattern"]
+        }
+      ]
+    },
+    "outputConfig": {
+      "type": "object",
+      "required": ["directory", "filename"],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Output directory with variable substitution"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Output filename (without extension) with variable substitution"
+        }
+      }
+    },
+    "symlinkConfig": {
+      "type": "object",
+      "required": ["target"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Symlink target directory with variable substitution"
+        }
+      }
+    },
+    "defaultsConfig": {
+      "type": "object",
+      "required": ["output"],
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/outputConfig"
+        }
+      }
+    },
+    "importSourceSpec": {
+      "type": "object",
+      "required": ["type", "enabled"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["local"],
+          "description": "Type of import source"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this source is enabled"
+        },
+        "local": {
+          "$ref": "#/$defs/localSourceConfig"
+        }
+      },
+      "if": {
+        "properties": { "type": { "const": "local" } }
+      },
+      "then": {
+        "required": ["local"]
+      }
+    },
+    "localSourceConfig": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to the local directory to watch"
+        },
+        "recursive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to watch subdirectories recursively"
+        },
+        "filters": {
+          "$ref": "#/$defs/fileFilters"
+        },
+        "pollInterval": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 60,
+          "description": "Poll interval in seconds"
+        }
+      }
+    },
+    "fileFilters": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["*"],
+          "description": "Glob patterns to include"
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Glob patterns to exclude"
+        }
+      }
+    }
+  }
+}

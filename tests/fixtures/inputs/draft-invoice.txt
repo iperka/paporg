@@ -1,0 +1,27 @@
+*** DRAFT ***
+
+DRAFT INVOICE - NOT FOR PAYMENT
+
+Invoice Number: DRAFT-001
+Date: January 28, 2026
+
+From: Pending Vendor Inc.
+
+Bill To:
+Test Customer
+123 Preview Lane
+
+Description                     Qty    Price      Total
+---------------------------------------------------------
+Proposed Services               10     TBD        TBD
+---------------------------------------------------------
+                               Subtotal:          TBD
+                               TOTAL:             TBD
+
+*** THIS IS A DRAFT DOCUMENT ***
+Do not process for payment.
+Final invoice will be issued upon approval.
+Pricing to be determined.
+
+Status: DRAFT
+Review Required: Yes

@@ -1,0 +1,23 @@
+INVOICE
+
+Invoice Number: INV-2026-001
+Date: January 15, 2026
+
+Invoice from: Acme Corporation
+
+Bill To:
+John Doe
+123 Main Street
+Anytown, USA
+
+Description                     Qty    Price      Total
+---------------------------------------------------------
+Professional Services           10     $100.00    $1,000.00
+Software License                1      $500.00    $500.00
+---------------------------------------------------------
+                               Subtotal:          $1,500.00
+                               Tax (8%):          $120.00
+                               TOTAL:             $1,620.00
+
+Payment is due within 30 days.
+Thank you for your business!

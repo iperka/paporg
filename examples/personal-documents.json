@@ -1,0 +1,138 @@
+{
+  "$schema": "../schema/config-v1.json",
+  "version": "1.0",
+  "input_directory": "./inbox",
+  "output_directory": "./documents",
+  "worker_count": 4,
+  "ocr": {
+    "enabled": true,
+    "languages": ["eng", "deu"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "year",
+        "pattern": "(?P<year>20[0-9]{2})",
+        "default": "unknown"
+      },
+      {
+        "name": "amount",
+        "pattern": "(?:CHF|EUR|USD)\\s*(?P<amount>[0-9]+[.,][0-9]{2})"
+      },
+      {
+        "name": "sender",
+        "pattern": "(?:From|Von|Absender)[:\\s]+(?P<sender>[A-Za-z0-9\\s]+)",
+        "transform": "slugify"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "tax-invoices",
+      "name": "Tax Invoices",
+      "priority": 100,
+      "match": {
+        "all": [
+          { "containsAny": ["Invoice", "Rechnung", "Faktura"] },
+          { "containsAny": ["VAT", "MwSt", "Mehrwertsteuer", "USt"] }
+        ]
+      },
+      "category": "Tax",
+      "output": {
+        "directory": "Tax/$year/Invoices",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "tax-statements",
+      "name": "Tax Statements",
+      "priority": 90,
+      "match": {
+        "containsAny": ["Tax Return", "Steuererklärung", "Tax Assessment", "Steuerbescheid"]
+      },
+      "category": "Tax",
+      "output": {
+        "directory": "Tax/$year/Statements",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "health-insurance",
+      "name": "Health Insurance",
+      "priority": 80,
+      "match": {
+        "all": [
+          { "containsAny": ["Insurance", "Versicherung", "Krankenkasse"] },
+          { "containsAny": ["Health", "Medical", "Gesundheit", "Kranken"] }
+        ]
+      },
+      "category": "Insurance",
+      "output": {
+        "directory": "Insurance/Health/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "liability-insurance",
+      "name": "Liability Insurance",
+      "priority": 80,
+      "match": {
+        "all": [
+          { "containsAny": ["Insurance", "Versicherung"] },
+          { "containsAny": ["Liability", "Haftpflicht"] }
+        ]
+      },
+      "category": "Insurance",
+      "output": {
+        "directory": "Insurance/Liability/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "medical-records",
+      "name": "Medical Records",
+      "priority": 70,
+      "match": {
+        "containsAny": ["Doctor", "Arzt", "Hospital", "Krankenhaus", "Diagnosis", "Diagnose", "Prescription", "Rezept", "Lab Results", "Laborbefund"]
+      },
+      "category": "Medical",
+      "output": {
+        "directory": "Medical/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "receipts",
+      "name": "Receipts",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Receipt", "Quittung", "Kassenbon", "Beleg"]
+      },
+      "category": "Receipts",
+      "output": {
+        "directory": "Receipts/$year/$m",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "correspondence",
+      "name": "Correspondence",
+      "priority": 30,
+      "match": {
+        "containsAny": ["Dear", "Sehr geehrte", "To Whom", "An wen"]
+      },
+      "category": "Correspondence",
+      "output": {
+        "directory": "Correspondence/$year",
+        "filename": "$original_$timestamp"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "$year/Unsorted",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

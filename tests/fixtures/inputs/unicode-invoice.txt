@@ -1,0 +1,11 @@
+INVOICE / 請求書 / RECHNUNG
+
+Invoice Number: UNI-2026-001
+Client: Müller & Associés
+Address: 東京都渋谷区
+
+Description                     Amount
+----------------------------------------
+Consulting Services (コンサル)  $1,000.00
+----------------------------------------
+Total / 合計:                   $1,000.00

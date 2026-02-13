@@ -1,0 +1,190 @@
+{
+  "$schema": "../schema/config-v1.json",
+  "version": "1.0",
+  "input_directory": "./inbox",
+  "output_directory": "./documents",
+  "worker_count": 4,
+  "ocr": {
+    "enabled": true,
+    "languages": ["eng", "deu", "fra"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "year",
+        "pattern": "(?P<year>20[0-9]{2})",
+        "default": "unknown"
+      },
+      {
+        "name": "language",
+        "pattern": "(?P<language>DE|EN|FR)",
+        "default": "unknown"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "invoices-german",
+      "name": "Invoices (German)",
+      "priority": 100,
+      "match": {
+        "containsAny": ["Rechnung", "Faktura", "Rechnungsnummer", "Zahlbar bis", "MwSt", "Mehrwertsteuer"]
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "Rechnungen/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "invoices-english",
+      "name": "Invoices (English)",
+      "priority": 100,
+      "match": {
+        "containsAny": ["Invoice", "Invoice Number", "Due Date", "VAT", "Total Amount"]
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "Invoices/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "invoices-french",
+      "name": "Invoices (French)",
+      "priority": 100,
+      "match": {
+        "containsAny": ["Facture", "Numéro de facture", "TVA", "Date d'échéance", "Montant total"]
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "Factures/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "contracts-german",
+      "name": "Contracts (German)",
+      "priority": 90,
+      "match": {
+        "containsAny": ["Vertrag", "Vereinbarung", "AGB", "Allgemeine Geschäftsbedingungen", "Vertragspartner"]
+      },
+      "category": "Contracts",
+      "output": {
+        "directory": "Verträge/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "contracts-english",
+      "name": "Contracts (English)",
+      "priority": 90,
+      "match": {
+        "containsAny": ["Contract", "Agreement", "Terms and Conditions", "Party", "Whereas"]
+      },
+      "category": "Contracts",
+      "output": {
+        "directory": "Contracts/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "contracts-french",
+      "name": "Contracts (French)",
+      "priority": 90,
+      "match": {
+        "containsAny": ["Contrat", "Convention", "Conditions générales", "Parties", "Entre les soussignés"]
+      },
+      "category": "Contracts",
+      "output": {
+        "directory": "Contrats/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "bank-statements-german",
+      "name": "Bank Statements (German)",
+      "priority": 80,
+      "match": {
+        "containsAny": ["Kontoauszug", "Kontobewegungen", "Saldo", "Haben", "Soll", "Buchungsdatum"]
+      },
+      "category": "Banking",
+      "output": {
+        "directory": "Kontoauszüge/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "bank-statements-english",
+      "name": "Bank Statements (English)",
+      "priority": 80,
+      "match": {
+        "containsAny": ["Bank Statement", "Account Statement", "Balance", "Credit", "Debit", "Transaction Date"]
+      },
+      "category": "Banking",
+      "output": {
+        "directory": "Bank Statements/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "bank-statements-french",
+      "name": "Bank Statements (French)",
+      "priority": 80,
+      "match": {
+        "containsAny": ["Relevé de compte", "Relevé bancaire", "Solde", "Crédit", "Débit", "Date de valeur"]
+      },
+      "category": "Banking",
+      "output": {
+        "directory": "Relevés bancaires/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "correspondence-german",
+      "name": "Correspondence (German)",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Sehr geehrte", "Mit freundlichen Grüßen", "Betreff", "Anlage"]
+      },
+      "category": "Correspondence",
+      "output": {
+        "directory": "Korrespondenz/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "correspondence-english",
+      "name": "Correspondence (English)",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Dear Sir", "Dear Madam", "Sincerely", "Kind regards", "To Whom It May Concern"]
+      },
+      "category": "Correspondence",
+      "output": {
+        "directory": "Correspondence/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "correspondence-french",
+      "name": "Correspondence (French)",
+      "priority": 50,
+      "match": {
+        "containsAny": ["Madame, Monsieur", "Cordialement", "Veuillez agréer", "Objet", "Pièce jointe"]
+      },
+      "category": "Correspondence",
+      "output": {
+        "directory": "Correspondance/$year",
+        "filename": "$original_$timestamp"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "$year/Unsorted",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

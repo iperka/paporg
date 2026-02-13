@@ -1,0 +1,17 @@
+apiVersion: paporg.io/v1
+kind: Rule
+metadata:
+  name: retail-receipts
+  labels:
+    category: shopping
+spec:
+  priority: 30
+  category: Receipts
+  match:
+    any:
+      - contains: Receipt
+      - contains: Kassenbon
+      - pattern: "(?i)total\\s*:?\\s*\\$?[0-9]+"
+  output:
+    directory: "Receipts/$year/$month"
+    filename: "$original_$timestamp"

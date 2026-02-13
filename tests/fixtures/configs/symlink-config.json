@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "input_directory": "/tmp/input",
+  "output_directory": "/tmp/output",
+  "worker_count": 1,
+  "ocr": {
+    "enabled": false,
+    "languages": ["eng"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "vendor",
+        "pattern": "(?i)from[:\\s]+(?P<vendor>[A-Za-z0-9\\s]+)",
+        "transform": "slugify",
+        "default": "unknown"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "invoice-with-symlinks",
+      "name": "Invoice with Symlinks",
+      "priority": 50,
+      "match": {
+        "contains": "Invoice"
+      },
+      "category": "invoices",
+      "output": {
+        "directory": "invoices/$y",
+        "filename": "$original"
+      },
+      "symlinks": [
+        { "target": "latest/invoices" },
+        { "target": "by-vendor/$vendor" }
+      ]
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "unsorted",
+      "filename": "$original"
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "version": "1.0",
+  "input_directory": "/tmp/paporg-test/input",
+  "output_directory": "/tmp/paporg-test/output",
+  "worker_count": 1,
+  "ocr": {
+    "enabled": false,
+    "languages": ["eng"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": []
+  },
+  "rules": [
+    {
+      "id": "tax-invoice",
+      "name": "Tax Invoice (AND condition)",
+      "priority": 100,
+      "match": {
+        "all": [
+          { "containsAny": ["Invoice", "Rechnung", "Bill"] },
+          { "containsAny": ["VAT", "MwSt", "Tax"] }
+        ]
+      },
+      "category": "tax-invoices",
+      "output": {
+        "directory": "tax/$y",
+        "filename": "$original"
+      }
+    },
+    {
+      "id": "non-draft-invoice",
+      "name": "Non-Draft Invoice (NOT condition)",
+      "priority": 90,
+      "match": {
+        "all": [
+          { "contains": "Invoice" },
+          { "not": { "containsAny": ["DRAFT", "Draft", "draft", "VOID", "Void"] } }
+        ]
+      },
+      "category": "final-invoices",
+      "output": {
+        "directory": "final/$y",
+        "filename": "$original"
+      }
+    },
+    {
+      "id": "multi-currency",
+      "name": "Multi-Currency Document (OR condition)",
+      "priority": 50,
+      "match": {
+        "any": [
+          { "pattern": "\\$[\\d,]+\\.\\d{2}" },
+          { "pattern": "€[\\d,]+\\.\\d{2}" },
+          { "pattern": "[\\d,]+\\s*(USD|EUR|GBP|CHF)" }
+        ]
+      },
+      "category": "financial",
+      "output": {
+        "directory": "financial/$y",
+        "filename": "$original"
+      }
+    },
+    {
+      "id": "nested-complex",
+      "name": "Complex Nested Condition",
+      "priority": 80,
+      "match": {
+        "all": [
+          {
+            "any": [
+              { "contains": "Contract" },
+              { "contains": "Agreement" }
+            ]
+          },
+          {
+            "not": {
+              "any": [
+                { "contains": "EXPIRED" },
+                { "contains": "CANCELLED" }
+              ]
+            }
+          },
+          { "pattern": "\\d{4}" }
+        ]
+      },
+      "category": "active-contracts",
+      "output": {
+        "directory": "contracts/active",
+        "filename": "$original"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "unsorted/$y",
+      "filename": "$original_$timestamp"
+    }
+  }
+}

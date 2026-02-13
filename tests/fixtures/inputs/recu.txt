@@ -1,0 +1,15 @@
+REÇU DE PAIEMENT / RECEIPT
+
+Numéro: REC-2026-001
+Date: 30 janvier 2026
+
+Magasin: Boutique Française
+
+Article                 Qté    Prix       Total
+------------------------------------------------
+Café                    2      €3,50      €7,00
+Croissant               3      €2,00      €6,00
+------------------------------------------------
+                        Total:            €13,00
+
+Merci de votre visite!

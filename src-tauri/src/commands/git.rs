@@ -1,0 +1,450 @@
+//! Git operation commands.
+
+use std::sync::Arc;
+
+use paporg::gitops::git::{
+    BranchInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus, PullResult,
+};
+use paporg::gitops::progress::GitOperationType;
+use tauri::State;
+use tokio::sync::RwLock;
+
+use super::ApiResponse;
+use crate::state::TauriAppState;
+
+// ============================================================================
+// Commands
+// ============================================================================
+
+/// Get git status.
+#[tauri::command]
+pub async fn git_status(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<GitStatus>, String> {
+    let state = state.read().await;
+
+    let config_dir = match &state.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = state
+        .config()
+        .map(|c| c.settings.resource.spec.git.clone())
+        .unwrap_or_default();
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    // Return a default status if not a git repo (instead of error)
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(GitStatus {
+            is_repo: false,
+            branch: None,
+            is_clean: true,
+            ahead: 0,
+            behind: 0,
+            modified_files: Vec::new(),
+            untracked_files: Vec::new(),
+            files: Vec::new(),
+        }));
+    }
+
+    match repo.status() {
+        Ok(status) => Ok(ApiResponse::ok(status)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Git pull.
+#[tauri::command]
+pub async fn git_pull(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<PullResult>, String> {
+    let state_guard = state.read().await;
+
+    let config_dir = match &state_guard.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = match state_guard.config() {
+        Some(c) => c.settings.resource.spec.git.clone(),
+        None => return Ok(ApiResponse::err("Configuration not loaded")),
+    };
+
+    if !git_settings.enabled {
+        return Ok(ApiResponse::err("Git is not enabled in settings"));
+    }
+
+    let git_broadcaster = state_guard.git_broadcaster.clone();
+    drop(state_guard);
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+    let progress = git_broadcaster.start_operation(GitOperationType::Pull);
+
+    match repo.pull_with_progress(&progress).await {
+        Ok(result) => {
+            if result.files_changed > 0 {
+                // Reload config
+                let mut state_write = state.write().await;
+                if let Err(e) = state_write.reload() {
+                    log::error!("Failed to reload config after git operation: {}", e);
+                }
+                drop(state_write);
+
+                crate::events::emit_config_changed(&app);
+            }
+            Ok(ApiResponse::ok(result))
+        }
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Git commit and push.
+#[tauri::command]
+pub async fn git_commit(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    message: String,
+    files: Option<Vec<String>>,
+) -> Result<ApiResponse<CommitResult>, String> {
+    let state_guard = state.read().await;
+
+    let config_dir = match &state_guard.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = match state_guard.config() {
+        Some(c) => c.settings.resource.spec.git.clone(),
+        None => return Ok(ApiResponse::err("Configuration not loaded")),
+    };
+
+    if !git_settings.enabled {
+        return Ok(ApiResponse::err("Git is not enabled in settings"));
+    }
+
+    let git_broadcaster = state_guard.git_broadcaster.clone();
+    drop(state_guard);
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+    let progress = git_broadcaster.start_operation(GitOperationType::Commit);
+
+    let files_ref: Option<Vec<&str>> = files
+        .as_ref()
+        .map(|f| f.iter().map(|s| s.as_str()).collect());
+
+    match repo
+        .commit_and_push_with_progress(&message, files_ref.as_deref(), &progress)
+        .await
+    {
+        Ok(result) => {
+            if result.commit_hash.is_some() {
+                crate::events::emit_config_changed(&app);
+            }
+            Ok(ApiResponse::ok(result))
+        }
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// List branches.
+#[tauri::command]
+pub async fn git_branches(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<Vec<BranchInfo>>, String> {
+    let state = state.read().await;
+
+    let config_dir = match &state.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = state
+        .config()
+        .map(|c| c.settings.resource.spec.git.clone())
+        .unwrap_or_default();
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    // Return empty list if not a git repo (instead of error)
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(Vec::new()));
+    }
+
+    match repo.list_branches() {
+        Ok(branches) => Ok(ApiResponse::ok(branches)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Checkout branch.
+#[tauri::command]
+pub async fn git_checkout(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    branch: String,
+) -> Result<ApiResponse<()>, String> {
+    let state_guard = state.read().await;
+
+    let config_dir = match &state_guard.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = state_guard
+        .config()
+        .map(|c| c.settings.resource.spec.git.clone())
+        .unwrap_or_default();
+
+    drop(state_guard);
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    match repo.checkout(&branch) {
+        Ok(()) => {
+            // Reload config
+            let mut state_write = state.write().await;
+            if let Err(e) = state_write.reload() {
+                log::error!("Failed to reload config after git operation: {}", e);
+            }
+            drop(state_write);
+
+            crate::events::emit_config_changed(&app);
+            Ok(ApiResponse::ok(()))
+        }
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Create branch.
+#[tauri::command]
+pub async fn git_create_branch(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    name: String,
+    checkout: bool,
+) -> Result<ApiResponse<()>, String> {
+    let state_guard = state.read().await;
+
+    let config_dir = match &state_guard.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = state_guard
+        .config()
+        .map(|c| c.settings.resource.spec.git.clone())
+        .unwrap_or_default();
+
+    drop(state_guard);
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    match repo.create_branch(&name, checkout) {
+        Ok(()) => {
+            if checkout {
+                // Reload config
+                let mut state_write = state.write().await;
+                if let Err(e) = state_write.reload() {
+                    log::error!("Failed to reload config after git operation: {}", e);
+                }
+                drop(state_write);
+            }
+            crate::events::emit_config_changed(&app);
+            Ok(ApiResponse::ok(()))
+        }
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Get merge status.
+#[tauri::command]
+pub async fn git_merge_status(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<MergeStatus>, String> {
+    let state = state.read().await;
+
+    let config_dir = match &state.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = match state.config() {
+        Some(c) => c.settings.resource.spec.git.clone(),
+        None => return Ok(ApiResponse::err("Configuration not loaded")),
+    };
+
+    if !git_settings.enabled {
+        return Ok(ApiResponse::err("Git is not enabled in settings"));
+    }
+
+    let branch = git_settings.branch.clone();
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    match repo.merge_status(&branch) {
+        Ok(status) => Ok(ApiResponse::ok(status)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Initialize git repository.
+#[tauri::command]
+pub async fn git_initialize(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<InitializeResult>, String> {
+    let state_guard = state.read().await;
+
+    let config_dir = match &state_guard.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    let git_settings = match state_guard.config() {
+        Some(c) => c.settings.resource.spec.git.clone(),
+        None => return Ok(ApiResponse::err("Configuration not loaded")),
+    };
+
+    if !git_settings.enabled {
+        return Ok(ApiResponse::err("Git is not enabled in settings"));
+    }
+
+    if git_settings.repository.is_empty() {
+        return Ok(ApiResponse::err("Git repository URL is not configured"));
+    }
+
+    let remote_url = git_settings.repository.clone();
+    let branch = git_settings.branch.clone();
+    drop(state_guard);
+
+    let repo = GitRepository::new(&config_dir, git_settings);
+
+    // Step 1: Initialize if not a repo
+    if !repo.is_git_repo() {
+        if let Err(e) = repo.init() {
+            return Ok(ApiResponse::err(format!("Failed to initialize git: {}", e)));
+        }
+    }
+
+    // Step 2: Set remote if not set
+    if let Err(e) = repo.set_remote(&remote_url) {
+        return Ok(ApiResponse::err(format!("Failed to set remote: {}", e)));
+    }
+
+    // Step 3: Fetch from remote
+    if let Err(e) = repo.fetch(&branch) {
+        let error_msg = e.to_string();
+        if error_msg.contains("couldn't find remote ref") || error_msg.contains("not found") {
+            return Ok(ApiResponse::ok(InitializeResult {
+                initialized: true,
+                merged: false,
+                message: "Repository initialized. Remote branch will be created on first push."
+                    .to_string(),
+                conflicting_files: Vec::new(),
+            }));
+        }
+        return Ok(ApiResponse::err(format!(
+            "Failed to fetch from remote: {}",
+            e
+        )));
+    }
+
+    // Step 4: Check if local repo has any commits
+    let has_local_commits = repo.has_commits();
+
+    if !has_local_commits {
+        match repo.checkout_remote_branch(&branch) {
+            Ok(()) => {
+                let mut state_write = state.write().await;
+                if let Err(e) = state_write.reload() {
+                    log::error!("Failed to reload config after git operation: {}", e);
+                }
+                drop(state_write);
+
+                crate::events::emit_config_changed(&app);
+
+                return Ok(ApiResponse::ok(InitializeResult {
+                    initialized: true,
+                    merged: true,
+                    message: "Repository initialized from remote.".to_string(),
+                    conflicting_files: Vec::new(),
+                }));
+            }
+            Err(e) => {
+                return Ok(ApiResponse::err(format!(
+                    "Failed to initialize from remote: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    // Step 5: Check merge status
+    let merge_status = match repo.merge_status(&branch) {
+        Ok(status) => status,
+        Err(e) => {
+            return Ok(ApiResponse::err(format!(
+                "Failed to check merge status: {}",
+                e
+            )));
+        }
+    };
+
+    if merge_status.behind == 0 {
+        return Ok(ApiResponse::ok(InitializeResult {
+            initialized: true,
+            merged: false,
+            message: "Repository initialized and up to date.".to_string(),
+            conflicting_files: Vec::new(),
+        }));
+    }
+
+    if merge_status.has_conflicts {
+        return Ok(ApiResponse::ok(InitializeResult {
+            initialized: true,
+            merged: false,
+            message: "Repository initialized but merge has conflicts.".to_string(),
+            conflicting_files: merge_status.conflicting_files,
+        }));
+    }
+
+    // Step 6: Perform merge
+    match repo.merge(&branch) {
+        Ok(result) => {
+            if result.success {
+                let mut state_write = state.write().await;
+                if let Err(e) = state_write.reload() {
+                    log::error!("Failed to reload config after git operation: {}", e);
+                }
+                drop(state_write);
+
+                crate::events::emit_config_changed(&app);
+
+                Ok(ApiResponse::ok(InitializeResult {
+                    initialized: true,
+                    merged: true,
+                    message: format!(
+                        "Repository initialized and merged {} files.",
+                        result.merged_files
+                    ),
+                    conflicting_files: Vec::new(),
+                }))
+            } else {
+                let _ = repo.merge_abort();
+
+                Ok(ApiResponse::ok(InitializeResult {
+                    initialized: true,
+                    merged: false,
+                    message: "Repository initialized but merge has conflicts.".to_string(),
+                    conflicting_files: result.conflicting_files,
+                }))
+            }
+        }
+        Err(e) => {
+            let _ = repo.merge_abort();
+            Ok(ApiResponse::err(format!("Failed to merge: {}", e)))
+        }
+    }
+}

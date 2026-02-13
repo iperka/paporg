@@ -1,0 +1,14 @@
+RECHNUNG
+
+Rechnungsnummer: RE-2026-001
+Datum: 30. Januar 2026
+
+Von: Deutsche Firma GmbH
+
+Beschreibung          Menge    Preis      Gesamt
+-------------------------------------------------
+Beratung              10       €100,00    €1.000,00
+-------------------------------------------------
+                      Zwischensumme:      €1.000,00
+                      MwSt (19%):         €190,00
+                      GESAMT:             €1.190,00

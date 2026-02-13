@@ -1,0 +1,11 @@
+apiVersion: paporg.io/v1
+kind: Rule
+metadata:
+  name: invalid-rule
+spec:
+  priority: 50
+  category: test
+  # Missing match condition - should fail validation
+  output:
+    directory: test
+    filename: test

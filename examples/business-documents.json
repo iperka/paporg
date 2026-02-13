@@ -1,0 +1,171 @@
+{
+  "$schema": "../schema/config-v1.json",
+  "version": "1.0",
+  "input_directory": "./inbox",
+  "output_directory": "./business-documents",
+  "worker_count": 8,
+  "ocr": {
+    "enabled": true,
+    "languages": ["eng", "deu"],
+    "dpi": 300
+  },
+  "variables": {
+    "extracted": [
+      {
+        "name": "year",
+        "pattern": "(?P<year>20[0-9]{2})",
+        "default": "unknown"
+      },
+      {
+        "name": "invoice_number",
+        "pattern": "(?:Invoice|Rechnung|INV)[#:\\s-]*(?P<invoice_number>[A-Z0-9-]+)"
+      },
+      {
+        "name": "client_name",
+        "pattern": "(?:Bill To|Rechnungsempfänger|Client)[:\\s]+(?P<client_name>[A-Za-z0-9\\s]+)",
+        "transform": "slugify"
+      },
+      {
+        "name": "contract_number",
+        "pattern": "(?:Contract|Vertrag)[#:\\s-]*(?P<contract_number>[A-Z0-9-]+)"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "id": "outgoing-invoices",
+      "name": "Outgoing Invoices",
+      "priority": 100,
+      "match": {
+        "all": [
+          { "containsAny": ["Invoice", "Rechnung", "Faktura"] },
+          { "containsAny": ["Bill To", "Rechnungsempfänger", "Our Reference"] }
+        ]
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "Invoices/Outgoing/$year",
+        "filename": "INV_$invoice_number_$timestamp"
+      },
+      "symlinks": [
+        { "target": "Clients/$client_name/Invoices" }
+      ]
+    },
+    {
+      "id": "incoming-invoices",
+      "name": "Incoming Invoices",
+      "priority": 100,
+      "match": {
+        "all": [
+          { "containsAny": ["Invoice", "Rechnung", "Faktura"] },
+          { "containsAny": ["Please Pay", "Zahlbar bis", "Due Date", "Fällig"] }
+        ]
+      },
+      "category": "Invoices",
+      "output": {
+        "directory": "Invoices/Incoming/$year/$m",
+        "filename": "INV_$invoice_number_$timestamp"
+      }
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts",
+      "priority": 90,
+      "match": {
+        "containsAny": ["Contract", "Vertrag", "Agreement", "Vereinbarung", "Terms and Conditions", "AGB"]
+      },
+      "category": "Contracts",
+      "output": {
+        "directory": "Contracts/$year",
+        "filename": "CONTRACT_$contract_number_$timestamp"
+      }
+    },
+    {
+      "id": "bank-statements",
+      "name": "Bank Statements",
+      "priority": 85,
+      "match": {
+        "containsAny": ["Bank Statement", "Kontoauszug", "Account Statement", "Kontobewegungen", "IBAN", "Balance"]
+      },
+      "category": "Banking",
+      "output": {
+        "directory": "Banking/Statements/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "employee-payslips",
+      "name": "Employee Payslips",
+      "priority": 80,
+      "match": {
+        "containsAny": ["Payslip", "Lohnabrechnung", "Salary", "Gehalt", "Wages", "Lohn"]
+      },
+      "category": "HR",
+      "output": {
+        "directory": "HR/Payroll/$year/$m",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "employee-contracts",
+      "name": "Employee Contracts",
+      "priority": 80,
+      "match": {
+        "all": [
+          { "containsAny": ["Employment", "Arbeitsvertrag", "Employee"] },
+          { "containsAny": ["Contract", "Vertrag", "Agreement"] }
+        ]
+      },
+      "category": "HR",
+      "output": {
+        "directory": "HR/Contracts",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "expense-reports",
+      "name": "Expense Reports",
+      "priority": 70,
+      "match": {
+        "containsAny": ["Expense Report", "Spesenabrechnung", "Reimbursement", "Erstattung", "Travel Expense", "Reisekosten"]
+      },
+      "category": "Expenses",
+      "output": {
+        "directory": "Expenses/$year/$m",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "quotes",
+      "name": "Quotes & Proposals",
+      "priority": 60,
+      "match": {
+        "containsAny": ["Quote", "Angebot", "Proposal", "Offerte", "Estimate", "Kostenvoranschlag"]
+      },
+      "category": "Sales",
+      "output": {
+        "directory": "Sales/Quotes/$year",
+        "filename": "$original_$timestamp"
+      }
+    },
+    {
+      "id": "orders",
+      "name": "Purchase Orders",
+      "priority": 60,
+      "match": {
+        "containsAny": ["Purchase Order", "Bestellung", "Order Confirmation", "Auftragsbestätigung", "PO Number"]
+      },
+      "category": "Purchasing",
+      "output": {
+        "directory": "Purchasing/Orders/$year",
+        "filename": "$original_$timestamp"
+      }
+    }
+  ],
+  "defaults": {
+    "output": {
+      "directory": "$year/Unsorted",
+      "filename": "$original_$timestamp"
+    }
+  }
+}
