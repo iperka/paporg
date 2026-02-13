@@ -4266,7 +4266,7 @@ dependencies = [
  "notify",
  "notify-debouncer-mini",
  "num_cpus",
- "quick-xml 0.36.2",
+ "quick-xml 0.38.4",
  "regex",
  "reqwest 0.12.28",
  "sea-orm",
@@ -4844,15 +4844,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "quick-xml"
-version = "0.36.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
