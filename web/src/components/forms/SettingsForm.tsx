@@ -4,7 +4,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import { TextField, NumberField, SwitchField, SelectField, ArrayField, SecretField } from '@/components/form'
+import { TextField, NumberField, SwitchField, SelectField, ArrayField, SecretField, PathField } from '@/components/form'
 import { type SettingsSpec } from '@/schemas/resources'
 import { Folder, Eye, GitBranch, Settings as SettingsIcon } from 'lucide-react'
 
@@ -85,23 +85,23 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <TextField
+            <PathField
               label="Input Directory"
               value={value.inputDirectory}
               onChange={(v) => updateField('inputDirectory', v)}
               description="Directory to watch for incoming documents"
               error={errors['inputDirectory']}
               required
-              mono
+              mode="folder"
             />
-            <TextField
+            <PathField
               label="Output Directory"
               value={value.outputDirectory}
               onChange={(v) => updateField('outputDirectory', v)}
               description="Base directory for organized documents"
               error={errors['outputDirectory']}
               required
-              mono
+              mode="folder"
             />
             <NumberField
               label="Worker Count"
@@ -270,13 +270,13 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
                   />
                 )}
                 {value.git.auth.type === 'ssh-key' && (
-                  <TextField
+                  <PathField
                     label="SSH Key Path"
                     value={value.git.auth.sshKeyPath || ''}
                     onChange={(v) => updateGitAuth('sshKeyPath', v)}
                     description="Path to SSH private key (leave empty to use SSH agent)"
                     placeholder="~/.ssh/id_rsa"
-                    mono
+                    mode="file"
                   />
                 )}
               </>

@@ -4,9 +4,9 @@
   "identifier": "com.iperka.paporg",
   "version": "0.1.2",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": { "script": "npm run dev", "cwd": "../web" },
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": { "script": "npm run build", "cwd": "../web" },
     "frontendDist": "../web/dist"
   },
   "app": {

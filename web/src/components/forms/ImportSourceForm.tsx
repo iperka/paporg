@@ -1,4 +1,4 @@
-import { TextField, NumberField, SwitchField, ArrayField, SelectField, SecretField, DateField } from '@/components/form'
+import { TextField, NumberField, SwitchField, ArrayField, SelectField, SecretField, DateField, PathField } from '@/components/form'
 import {
   type ImportSourceSpec,
   type ImportSourceType,
@@ -184,7 +184,7 @@ export function ImportSourceForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <TextField
+            <PathField
               label="Path"
               value={value.local?.path || ''}
               onChange={(v) => updateLocalConfig('path', v)}
@@ -192,6 +192,7 @@ export function ImportSourceForm({
               error={errors['local.path']}
               required
               placeholder="/Users/me/Downloads"
+              mode="folder"
             />
 
             <SwitchField
