@@ -9,6 +9,7 @@ use std::time::Duration;
 use log::{debug, error, info, warn};
 use paporg::broadcast::{GitProgressBroadcaster, JobProgressBroadcaster, JobStore, LogBroadcaster};
 use paporg::gitops::LoadedConfig;
+use paporg::pipeline::PipelineConfig;
 use paporg::worker::{MultiSourceScanner, WorkerPool};
 use tokio::sync::broadcast;
 
@@ -102,11 +103,13 @@ impl TauriAppState {
             .ok_or("Configuration not loaded")?;
 
         let legacy_config = config.to_legacy_config();
+        let pipeline_config = Arc::new(PipelineConfig::from_config(&legacy_config));
 
         // Create worker pool with job progress broadcaster for UI updates
         let job_sender = self.job_broadcaster.sender();
         let pool = Arc::new(WorkerPool::with_progress_sender(
-            &legacy_config,
+            pipeline_config,
+            legacy_config.worker_count,
             Some(job_sender),
         ));
         self.worker_pool = Some(Arc::clone(&pool));
