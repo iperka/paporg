@@ -6,6 +6,7 @@ pub mod db;
 pub mod email;
 pub mod error;
 pub mod gitops;
+pub mod pipeline;
 pub mod processor;
 pub mod secrets;
 pub mod storage;
@@ -16,4 +17,5 @@ pub use broadcast::{GitProgressBroadcaster, JobProgressBroadcaster, JobStore, Lo
 pub use config::{load_config, Config, DocumentFormat, VariableEngine};
 pub use error::{ConfigError, PaporgError, ProcessError, Result, StorageError, WorkerError};
 pub use gitops::{ConfigLoader, GitOpsError, LoadedConfig};
+pub use pipeline::{Pipeline, PipelineConfig, PipelineContext};
 pub use secrets::{resolve_secret, resolve_secret_optional, SecretError, TokenEncryptor};
