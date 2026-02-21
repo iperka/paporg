@@ -200,6 +200,8 @@ fn main() {
             commands::delete_file,
             commands::read_raw_file,
             commands::write_raw_file,
+            commands::pick_folder,
+            commands::pick_file,
             // Upload commands
             commands::upload_files,
             commands::pick_and_upload_files,

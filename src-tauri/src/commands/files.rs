@@ -277,6 +277,38 @@ pub async fn read_raw_file(
     }
 }
 
+/// Open native folder picker dialog (no side effects).
+#[tauri::command]
+pub async fn pick_folder(app: tauri::AppHandle) -> Result<ApiResponse<Option<String>>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let folder_path = app.dialog().file().blocking_pick_folder();
+
+    match folder_path {
+        Some(path) => Ok(ApiResponse::ok(Some(path.to_string()))),
+        None => Ok(ApiResponse::ok(None)),
+    }
+}
+
+/// Open native file picker dialog (no side effects).
+#[tauri::command]
+pub async fn pick_file(app: tauri::AppHandle) -> Result<ApiResponse<Option<String>>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = app.dialog().file().blocking_pick_file();
+
+    match file_path {
+        Some(path) => {
+            let path_str = path
+                .as_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string());
+            Ok(ApiResponse::ok(Some(path_str)))
+        }
+        None => Ok(ApiResponse::ok(None)),
+    }
+}
+
 /// Write raw file content.
 #[tauri::command]
 pub async fn write_raw_file(

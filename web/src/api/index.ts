@@ -525,6 +525,16 @@ export const api = {
       const response = await invoke<ApiResponse<FileResponse>>('write_raw_file', { path, content });
       return unwrap(response);
     },
+
+    pickFolder: async (): Promise<string | null> => {
+      const response = await invoke<ApiResponse<string | null>>('pick_folder');
+      return unwrap(response);
+    },
+
+    pickFile: async (): Promise<string | null> => {
+      const response = await invoke<ApiResponse<string | null>>('pick_file');
+      return unwrap(response);
+    },
   },
 
   // ---------------------------------------------------------------------------
