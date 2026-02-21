@@ -159,13 +159,7 @@ fn run_worker(
                     });
 
                     let ctx = PipelineContext::new(job);
-                    let (result, ctx) = pipeline.run(ctx, &progress);
-
-                    // Store OCR text for broadcast
-                    if let Some(ref processed) = ctx.processed {
-                        progress.set_ocr_text(processed.text.clone());
-                    }
-
+                    let (result, _ctx) = pipeline.run(ctx, &progress);
                     result
                 } else {
                     let ctx = PipelineContext::new(job);

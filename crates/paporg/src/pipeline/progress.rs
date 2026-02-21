@@ -24,6 +24,8 @@ pub enum ProgressEvent {
 
 pub trait ProgressReporter: Send + Sync {
     fn report(&self, event: ProgressEvent);
+    /// Store OCR text so it is available when the Completed event is emitted.
+    fn set_ocr_text(&self, _text: String) {}
 }
 
 /// No-op reporter for unit tests.

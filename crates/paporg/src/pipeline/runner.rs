@@ -27,11 +27,8 @@ pub struct Pipeline {
 impl Pipeline {
     /// Production constructor — builds all sub-components from config.
     pub fn from_config(config: Arc<PipelineConfig>) -> Self {
-        let processor = ProcessorRegistry::new(
-            config.ocr_enabled,
-            &config.ocr_languages,
-            config.ocr_dpi,
-        );
+        let processor =
+            ProcessorRegistry::new(config.ocr_enabled, &config.ocr_languages, config.ocr_dpi);
         let categorizer = Categorizer::new(config.rules.clone(), config.defaults.clone());
         let variable_engine = VariableEngine::new(&config.extracted_variables);
         let storage = FileStorage::new(&config.output_directory);
@@ -144,13 +141,21 @@ impl Pipeline {
             .map(|c| c.category.clone())
             .unwrap_or_else(|| "unsorted".to_string());
         let output_path = ctx.output_path.clone().expect("output_path set in step 5");
-        let archive_path = ctx.archive_path.clone().expect("archive_path set in step 7");
+        let archive_path = ctx
+            .archive_path
+            .clone()
+            .expect("archive_path set in step 7");
         let symlink_paths = ctx.symlink_paths.clone();
 
         let symlink_strings: Vec<String> = symlink_paths
             .iter()
             .map(|p| p.display().to_string())
             .collect();
+
+        // Inject OCR text before emitting Completed so the broadcast includes it
+        if let Some(ref processed) = ctx.processed {
+            progress.set_ocr_text(processed.text.clone());
+        }
 
         progress.report(ProgressEvent::Completed {
             output_path: output_path.display().to_string(),
@@ -159,7 +164,8 @@ impl Pipeline {
             category: category.clone(),
         });
 
-        let result = JobResult::success(&ctx.job, output_path, archive_path, symlink_paths, category);
+        let result =
+            JobResult::success(&ctx.job, output_path, archive_path, symlink_paths, category);
         (result, ctx)
     }
 
@@ -284,9 +290,12 @@ impl Pipeline {
             message: "Storing document...".to_string(),
         });
 
-        let output_path =
-            self.storage
-                .store(&processed.pdf_bytes, &output_directory, &output_filename, "pdf")?;
+        let output_path = self.storage.store(
+            &processed.pdf_bytes,
+            &output_directory,
+            &output_filename,
+            "pdf",
+        )?;
 
         info!(
             "Stored {} -> {} (category: {})",
@@ -311,7 +320,10 @@ impl Pipeline {
                 &ctx.extracted_variables,
             );
 
-            match self.symlink_manager.create_symlink(output_path, &symlink_dir) {
+            match self
+                .symlink_manager
+                .create_symlink(output_path, &symlink_dir)
+            {
                 Ok(symlink_path) => {
                     info!("Created symlink: {}", symlink_path.display());
                     ctx.symlink_paths.push(symlink_path);
@@ -499,7 +511,12 @@ mod tests {
         let result = pipeline.step_process_document(&mut ctx);
         assert!(result.is_ok());
         assert!(ctx.processed.is_some());
-        assert!(ctx.processed.as_ref().unwrap().text.contains("Content here"));
+        assert!(ctx
+            .processed
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("Content here"));
     }
 
     #[test]
@@ -844,7 +861,12 @@ mod tests {
             .unwrap()
             .contains("empty")
             .then_some(())
-            .or_else(|| result.error.as_ref().unwrap().contains("dots").then_some(()))
+            .or_else(|| result
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("dots")
+                .then_some(()))
             .is_some());
     }
 
