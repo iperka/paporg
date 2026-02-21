@@ -28,11 +28,15 @@ impl WorkerPool {
     }
 
     /// Creates a new worker pool with an optional job progress broadcaster.
+    ///
+    /// # Panics
+    /// Panics if `worker_count` is 0.
     pub fn with_progress_sender(
         config: Arc<PipelineConfig>,
         worker_count: usize,
         job_progress_sender: Option<Arc<broadcast::Sender<JobProgressEvent>>>,
     ) -> Self {
+        assert!(worker_count > 0, "worker_count must be > 0");
         let (job_sender, job_receiver) = bounded::<Job>(worker_count * 2);
         let (result_sender, result_receiver) = bounded::<JobResult>(worker_count * 2);
         let shutdown = Arc::new(AtomicBool::new(false));
