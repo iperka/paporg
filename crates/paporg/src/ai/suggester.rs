@@ -205,7 +205,13 @@ impl RuleSuggester {
         let files_text: String = context
             .files
             .iter()
-            .map(|(status, path)| format!("  {} {}", sanitize_for_prompt(status), sanitize_for_prompt(path)))
+            .map(|(status, path)| {
+                format!(
+                    "  {} {}",
+                    sanitize_for_prompt(status),
+                    sanitize_for_prompt(path)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -260,8 +266,7 @@ Diff:
 
         // Check if the message starts with a valid type
         let is_valid = TYPES.iter().any(|t| {
-            first_line.starts_with(&format!("{}:", t))
-                || first_line.starts_with(&format!("{}(", t))
+            first_line.starts_with(&format!("{}:", t)) || first_line.starts_with(&format!("{}(", t))
         });
 
         let message = if is_valid {
@@ -373,7 +378,12 @@ For UPDATING existing rules, use:
     ///
     /// - `max_tokens`: maximum number of tokens to generate.
     /// - `early_stop`: optional substring that triggers early termination when found in output.
-    fn generate(&self, prompt: &str, max_tokens: usize, early_stop: Option<&str>) -> Result<String, SuggesterError> {
+    fn generate(
+        &self,
+        prompt: &str,
+        max_tokens: usize,
+        early_stop: Option<&str>,
+    ) -> Result<String, SuggesterError> {
         // Create context for this generation
         let mut ctx = self
             .model

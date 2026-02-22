@@ -263,11 +263,7 @@ impl RuleSuggester {
         let filenames: Vec<&str> = context
             .files
             .iter()
-            .map(|(_, path)| {
-                path.rsplit('/')
-                    .next()
-                    .unwrap_or(path.as_str())
-            })
+            .map(|(_, path)| path.rsplit('/').next().unwrap_or(path.as_str()))
             .collect();
 
         let desc = if filenames.len() <= 3 {
