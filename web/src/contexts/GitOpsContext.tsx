@@ -26,6 +26,7 @@ interface GitOpsContextValue {
   isConnected: boolean
   settings: SettingsResource | null
   needsInitialization: boolean
+  initialLoadComplete: boolean
 
   // Actions
   refreshTree: () => Promise<void>
@@ -72,6 +73,7 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
   const [error, setError] = useState<string | null>(null)
   const [isConnected, setIsConnected] = useState(true) // Always connected in Tauri
   const [settings, setSettings] = useState<SettingsResource | null>(null)
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
 
   const unlistenRef = useRef<UnlistenFn | null>(null)
 
@@ -82,8 +84,9 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
     return () => clearTimeout(timer)
   }, [error])
 
-  // Compute if git needs initialization
+  // Only claim "needs initialization" when all initial data is loaded
   const needsInitialization = Boolean(
+    initialLoadComplete &&
     settings?.spec.git.enabled &&
     settings?.spec.git.repository &&
     gitStatus &&
@@ -153,7 +156,7 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
     }
   }, [])
 
-  // Initial load
+  // Initial load — await all before marking complete
   useEffect(() => {
     const init = async () => {
       // Ensure backend config is loaded
@@ -163,11 +166,14 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
         console.warn('Failed to reload config on init:', e)
       }
 
-      // Then refresh all data
-      refreshTree()
-      refreshGitStatus()
-      refreshBranches()
-      refreshSettings()
+      // Then refresh all data and wait for completion
+      await Promise.allSettled([
+        refreshTree(),
+        refreshGitStatus(),
+        refreshBranches(),
+        refreshSettings(),
+      ])
+      setInitialLoadComplete(true)
     }
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -525,6 +531,7 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
     isConnected,
     settings,
     needsInitialization,
+    initialLoadComplete,
     refreshTree,
     refreshGitStatus,
     refreshBranches,

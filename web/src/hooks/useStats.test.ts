@@ -167,6 +167,7 @@ describe('useStats', () => {
       error: null,
       settings: null,
       needsInitialization: false,
+      initialLoadComplete: true,
       refreshTree: vi.fn(),
       refreshGitStatus: vi.fn(),
       refreshBranches: vi.fn(),

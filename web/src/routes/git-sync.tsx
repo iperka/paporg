@@ -426,7 +426,7 @@ function CommitHistoryCard() {
 }
 
 export function GitSyncPage() {
-  const { fileTree, selectFile, selectedResource, updateResource, isLoading, gitStatus, gitPull, refreshGitStatus, error: gitOpsError, needsInitialization, initializeGit } = useGitOps()
+  const { fileTree, selectFile, selectedResource, updateResource, isLoading, gitStatus, gitPull, refreshGitStatus, error: gitOpsError, needsInitialization, initialLoadComplete, initializeGit } = useGitOps()
   const { hasActiveOperations, activeOperations } = useGitProgressContext()
   const { toast } = useToast()
 
@@ -441,11 +441,13 @@ export function GitSyncPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isInitializing, setIsInitializing] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
+  const [statusChecked, setStatusChecked] = useState(false)
 
-  // Refresh git status when configured mode is shown
+  // Refresh git status when configured mode is shown, track completion
   useEffect(() => {
     if (setupMode === 'configured') {
-      refreshGitStatus()
+      setStatusChecked(false)
+      refreshGitStatus().finally(() => setStatusChecked(true))
     }
   }, [setupMode, refreshGitStatus])
 
@@ -463,6 +465,9 @@ export function GitSyncPage() {
     // Wait for settings to be loaded (initialData is set when settings are parsed)
     if (!initialData) return
 
+    // Wait for context initial load to complete so gitStatus is fresh
+    if (!initialLoadComplete) return
+
     // Mark that we've checked the initial state
     hasSetInitialModeRef.current = true
 
@@ -470,7 +475,7 @@ export function GitSyncPage() {
     if (initialData.git.enabled && initialData.git.repository) {
       setSetupMode('configured')
     }
-  }, [initialData])
+  }, [initialData, initialLoadComplete])
 
   useEffect(() => {
     const findSettingsPath = (node: typeof fileTree): string | null => {
@@ -789,8 +794,15 @@ export function GitSyncPage() {
     setCurrentStep(1)
   }
 
-  // Render pending initialization state
+  // Render pending initialization state — wait for fresh status check
   if (setupMode === 'configured' && isConfigured && needsInitialization) {
+    if (!statusChecked) {
+      return (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      )
+    }
     return (
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Header */}
