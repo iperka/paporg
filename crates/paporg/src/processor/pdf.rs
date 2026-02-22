@@ -18,6 +18,8 @@ impl PdfProcessor {
 
 impl DocumentProcessor for PdfProcessor {
     fn process(&self, path: &Path) -> Result<ProcessedContent, ProcessError> {
+        let _span = tracing::info_span!("processor.pdf").entered();
+
         let pdf_bytes = std::fs::read(path).map_err(|e| ProcessError::ReadDocument {
             path: path.to_path_buf(),
             source: e,
@@ -31,6 +33,9 @@ impl DocumentProcessor for PdfProcessor {
                 // If no usable text was extracted and OCR is available, try OCR
                 if should_use_ocr(&text) {
                     if let Some(ref ocr) = self.ocr {
+                        let _ocr_span =
+                            tracing::info_span!("processor.ocr_fallback", reason = "text_quality")
+                                .entered();
                         text = self.ocr_pdf(&pdf_bytes, &doc, ocr)?;
                     }
                 }
@@ -39,12 +44,17 @@ impl DocumentProcessor for PdfProcessor {
             Err(e) => {
                 // lopdf can't parse this PDF (e.g. invalid cross-reference table).
                 // Fall back to OCR via pdftoppm/poppler which handles more PDF variants.
-                log::warn!(
+                tracing::warn!(
                     "lopdf failed to parse {}: {}. Falling back to OCR.",
                     path.display(),
                     e
                 );
                 if let Some(ref ocr) = self.ocr {
+                    let _ocr_span = tracing::info_span!(
+                        "processor.ocr_fallback",
+                        reason = "lopdf_parse_failed"
+                    )
+                    .entered();
                     self.ocr_pdf_without_doc(&pdf_bytes, ocr)?
                 } else {
                     return Err(ProcessError::PdfProcessing(format!(

@@ -49,6 +49,13 @@ impl FileStorage {
         filename: &str,
         extension: &str,
     ) -> Result<PathBuf, StorageError> {
+        let _span = tracing::info_span!(
+            "storage.store",
+            directory = relative_directory,
+            filename,
+            bytes = content.len()
+        )
+        .entered();
         let dir_path = self.output_directory.join(relative_directory);
         self.ensure_directory(&dir_path)?;
 
@@ -127,6 +134,7 @@ impl FileStorage {
         input_directory: &Path,
     ) -> Result<PathBuf, StorageError> {
         let source_path = source_path.as_ref();
+        let _span = tracing::info_span!("storage.archive").entered();
 
         // Create archive directory inside input directory
         let archive_dir = input_directory.join("archive");

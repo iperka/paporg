@@ -1,9 +1,10 @@
 .PHONY: all build build-debug build-release build-no-bundle \
         build-macos build-macos-intel build-macos-arm \
         build-linux build-windows \
-        dev clean test lint fmt check \
+        dev dev-otel clean test lint fmt check \
         install install-tauri install-targets setup-hooks icons \
         release release-patch release-minor release-major \
+        observability-up observability-down \
         help
 
 # Default target
@@ -16,6 +17,24 @@ all: build
 # Run Tauri in development mode (hot reload)
 dev:
 	cd src-tauri && cargo tauri dev
+
+# ============================================
+# Observability
+# ============================================
+
+# Start the observability stack (Grafana + Tempo + Loki + Pyroscope)
+observability-up:
+	docker compose -f docker-compose.observability.yml up -d
+	@echo "Grafana:   http://localhost:3000"
+	@echo "Run app:   make dev-otel"
+
+# Stop the observability stack
+observability-down:
+	docker compose -f docker-compose.observability.yml down
+
+# Run Tauri in dev mode with OpenTelemetry enabled
+dev-otel: observability-up
+	cd src-tauri && RUST_LOG=debug cargo tauri dev --features otel
 
 # ============================================
 # Build Targets
@@ -229,6 +248,11 @@ help:
 	@echo "  install-tauri      - Install Tauri CLI"
 	@echo "  install-targets    - Install Rust cross-compilation targets"
 	@echo "  setup-hooks        - Install git pre-commit hooks"
+	@echo ""
+	@echo "Observability:"
+	@echo "  observability-up   - Start Grafana + Tempo + Loki + Pyroscope stack"
+	@echo "  observability-down - Stop the observability stack"
+	@echo "  dev-otel           - Run dev mode with OTel (starts stack automatically)"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  clean              - Remove build artifacts"

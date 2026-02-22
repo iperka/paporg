@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use glob::Pattern;
-use log::{debug, error, info, warn};
 use notify::{Config as NotifyConfig, PollWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer_opt, Config as DebouncerConfig, DebouncedEventKind};
 use sea_orm::DatabaseConnection;
+use tracing::{debug, error, info, info_span, warn};
 use walkdir::WalkDir;
 
 use crate::config::DocumentFormat;
@@ -198,6 +198,7 @@ impl MultiSourceScanner {
     /// Scans all configured sources and returns discovered jobs.
     /// Note: For email sources, use `scan_async()` instead.
     pub fn scan(&self) -> Result<Vec<Job>, WorkerError> {
+        let _span = info_span!("scan_cycle", source_count = self.sources.len()).entered();
         let mut jobs = Vec::new();
 
         for source in &self.sources {
@@ -231,6 +232,7 @@ impl MultiSourceScanner {
 
     /// Scans all configured sources asynchronously (required for email sources).
     pub async fn scan_async(&self) -> Result<Vec<Job>, WorkerError> {
+        let _span = info_span!("scan_cycle", source_count = self.sources.len()).entered();
         let mut jobs = Vec::new();
 
         for source in &self.sources {
@@ -272,9 +274,10 @@ impl MultiSourceScanner {
 
     /// Scans a local directory source and returns discovered jobs.
     fn scan_local_source(&self, source: &LocalEnabledSource) -> Result<Vec<Job>, WorkerError> {
+        let _span = info_span!("scan_source", name = %source.name, kind = "local").entered();
         let mut jobs = Vec::new();
 
-        info!(
+        debug!(
             "Scanning local source '{}' at path: {}",
             source.name,
             source.path.display()
@@ -291,7 +294,7 @@ impl MultiSourceScanner {
 
         let max_depth = if source.recursive { usize::MAX } else { 1 };
 
-        info!(
+        debug!(
             "Source '{}' has {} include patterns, {} exclude patterns",
             source.name,
             source.include_patterns.len(),
@@ -333,7 +336,7 @@ impl MultiSourceScanner {
             // Check if file format is supported
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if DocumentFormat::from_extension(ext).is_some() {
-                    info!("Found document in '{}': {}", source.name, path.display());
+                    debug!("Found document in '{}': {}", source.name, path.display());
                     jobs.push(Job::new_with_source(
                         path.to_path_buf(),
                         source.name.clone(),

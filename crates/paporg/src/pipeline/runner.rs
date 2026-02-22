@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use log::{info, warn};
+use tracing::{debug, info_span, warn};
 
 use crate::broadcast::job_progress::JobPhase;
 use crate::categorizer::Categorizer;
 use crate::config::VariableEngine;
 use crate::processor::ProcessorRegistry;
+use crate::sanitize;
 use crate::storage::{FileStorage, SymlinkManager};
 use crate::worker::job::JobResult;
 
@@ -71,67 +72,96 @@ impl Pipeline {
         mut ctx: PipelineContext,
         progress: &dyn ProgressReporter,
     ) -> (JobResult, PipelineContext) {
+        let filename = sanitize::redact_path(&ctx.job.source_path);
+        let _pipeline_span = info_span!("pipeline",
+            job_id = %ctx.job.id,
+            filename = %filename,
+            source_name = ctx.job.source_name.as_deref().unwrap_or("unknown"),
+        )
+        .entered();
+
         // Step 1: Process document
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::Processing,
-            message: "Running OCR and text extraction...".to_string(),
-        });
-        if let Err(e) = self.step_process_document(&mut ctx) {
-            let err_msg = e.to_string();
-            progress.report(ProgressEvent::Failed {
-                error: err_msg.clone(),
+        {
+            let _step = info_span!("process_document").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::Processing,
+                message: "Running OCR and text extraction...".to_string(),
             });
-            return (JobResult::failure(&ctx.job, err_msg), ctx);
+            if let Err(e) = self.step_process_document(&mut ctx) {
+                let err_msg = e.to_string();
+                progress.report(ProgressEvent::Failed {
+                    error: err_msg.clone(),
+                });
+                return (JobResult::failure(&ctx.job, err_msg), ctx);
+            }
         }
 
         // Step 2: Prepare matching text
-        self.step_prepare_text(&mut ctx);
+        {
+            let _step = info_span!("prepare_text").entered();
+            self.step_prepare_text(&mut ctx);
+        }
 
         // Step 3: Extract variables
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::ExtractVariables,
-            message: "Extracting variables from document...".to_string(),
-        });
-        self.step_extract_variables(&mut ctx);
+        {
+            let _step = info_span!("extract_variables").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::ExtractVariables,
+                message: "Extracting variables from document...".to_string(),
+            });
+            self.step_extract_variables(&mut ctx);
+        }
 
         // Step 4: Categorize
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::Categorizing,
-            message: "Categorizing document...".to_string(),
-        });
-        self.step_categorize(&mut ctx);
+        {
+            let _step = info_span!("categorize").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::Categorizing,
+                message: "Categorizing document...".to_string(),
+            });
+            self.step_categorize(&mut ctx);
+        }
 
         // Step 5+6: Resolve output path and store
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::Substituting,
-            message: "Substituting variables in path...".to_string(),
-        });
-        if let Err(e) = self.step_resolve_and_store(&mut ctx, progress) {
-            let err_msg = e.to_string();
-            progress.report(ProgressEvent::Failed {
-                error: err_msg.clone(),
+        {
+            let _step = info_span!("resolve_and_store").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::Substituting,
+                message: "Substituting variables in path...".to_string(),
             });
-            return (JobResult::failure(&ctx.job, err_msg), ctx);
+            if let Err(e) = self.step_resolve_and_store(&mut ctx, progress) {
+                let err_msg = e.to_string();
+                progress.report(ProgressEvent::Failed {
+                    error: err_msg.clone(),
+                });
+                return (JobResult::failure(&ctx.job, err_msg), ctx);
+            }
         }
 
         // Step 7: Create symlinks
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::CreatingSymlinks,
-            message: "Creating symlinks...".to_string(),
-        });
-        self.step_create_symlinks(&mut ctx);
+        {
+            let _step = info_span!("create_symlinks").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::CreatingSymlinks,
+                message: "Creating symlinks...".to_string(),
+            });
+            self.step_create_symlinks(&mut ctx);
+        }
 
         // Step 8: Archive source
-        progress.report(ProgressEvent::Phase {
-            phase: JobPhase::Archiving,
-            message: "Archiving source file...".to_string(),
-        });
-        if let Err(e) = self.step_archive_source(&mut ctx) {
-            let err_msg = e.to_string();
-            progress.report(ProgressEvent::Failed {
-                error: err_msg.clone(),
+        {
+            let _step = info_span!("archive_source").entered();
+            progress.report(ProgressEvent::Phase {
+                phase: JobPhase::Archiving,
+                message: "Archiving source file...".to_string(),
             });
-            return (JobResult::failure(&ctx.job, err_msg), ctx);
+            if let Err(e) = self.step_archive_source(&mut ctx) {
+                let err_msg = e.to_string();
+                progress.report(ProgressEvent::Failed {
+                    error: err_msg.clone(),
+                });
+                return (JobResult::failure(&ctx.job, err_msg), ctx);
+            }
         }
 
         // Build success result
@@ -297,10 +327,10 @@ impl Pipeline {
             "pdf",
         )?;
 
-        info!(
+        debug!(
             "Stored {} -> {} (category: {})",
-            ctx.job.source_path.display(),
-            output_path.display(),
+            sanitize::redact_path(&ctx.job.source_path),
+            sanitize::redact_path(&output_path),
             categorization.category
         );
 
@@ -325,7 +355,7 @@ impl Pipeline {
                 .create_symlink(output_path, &symlink_dir)
             {
                 Ok(symlink_path) => {
-                    info!("Created symlink: {}", symlink_path.display());
+                    debug!("Created symlink: {}", sanitize::redact_path(&symlink_path));
                     ctx.symlink_paths.push(symlink_path);
                 }
                 Err(e) => {

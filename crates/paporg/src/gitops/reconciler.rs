@@ -63,6 +63,7 @@ impl GitReconciler {
     /// Uses a lock to prevent concurrent reconcile calls. Returns early
     /// if another reconcile is already in progress.
     /// Retries transient errors (network, timeout) with exponential backoff.
+    #[tracing::instrument(name = "git_reconcile", skip_all)]
     pub async fn reconcile(&self, progress: &OperationProgress) -> Result<ReconcileResult> {
         // Try to acquire the lock; skip if already reconciling
         let _guard = match self.reconcile_lock.try_lock() {

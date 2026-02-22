@@ -24,6 +24,8 @@ impl ImageProcessor {
 
 impl DocumentProcessor for ImageProcessor {
     fn process(&self, path: &Path) -> Result<ProcessedContent, ProcessError> {
+        let _span = tracing::info_span!("processor.image").entered();
+
         let image_data = std::fs::read(path).map_err(|e| ProcessError::ReadDocument {
             path: path.to_path_buf(),
             source: e,

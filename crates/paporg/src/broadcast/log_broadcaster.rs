@@ -2,8 +2,13 @@
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::fmt;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::field::{Field, Visit};
+use tracing::Subscriber;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::Layer;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LogEvent {
@@ -71,69 +76,59 @@ impl Default for LogBroadcaster {
     }
 }
 
-/// A log writer that can be used with env_logger to broadcast logs.
-pub struct BroadcastingLogWriter {
+/// A tracing `Layer` that broadcasts log events via `LogBroadcaster`.
+///
+/// Replaces the old `BroadcastingLogWriter` (which parsed env_logger text
+/// with regexes). This layer receives structured event data directly from
+/// the tracing subscriber — no parsing needed.
+pub struct BroadcastLayer {
     broadcaster: Arc<LogBroadcaster>,
 }
 
-impl BroadcastingLogWriter {
+impl BroadcastLayer {
     pub fn new(broadcaster: Arc<LogBroadcaster>) -> Self {
         Self { broadcaster }
     }
 }
 
-impl std::io::Write for BroadcastingLogWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        // Parse the log line and broadcast it
-        if let Ok(line) = std::str::from_utf8(buf) {
-            // Simple parsing - in practice you'd want more robust parsing
-            let line = line.trim();
-            if !line.is_empty() {
-                // Try to parse level from env_logger format: [TIMESTAMP LEVEL target] message
-                let (level, target, message) = parse_log_line(line);
-                self.broadcaster.log(&level, &target, &message);
-            }
-        }
-        Ok(buf.len())
-    }
+impl<S: Subscriber> Layer<S> for BroadcastLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        let level = match *metadata.level() {
+            tracing::Level::ERROR => "ERROR",
+            tracing::Level::WARN => "WARN",
+            tracing::Level::INFO => "INFO",
+            tracing::Level::DEBUG => "DEBUG",
+            tracing::Level::TRACE => "TRACE",
+        };
+
+        let target = metadata.target();
+
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
+
+        self.broadcaster.log(level, target, &visitor.message);
     }
 }
 
-fn parse_log_line(line: &str) -> (String, String, String) {
-    // env_logger default format: [2024-01-15T10:30:00Z INFO  target] message
-    // Try to extract level and target from bracketed prefix
-    if let Some(bracket_end) = line.find(']') {
-        let prefix = &line[..bracket_end];
-        let message = line[bracket_end + 1..].trim().to_string();
+/// Visitor that extracts the `message` field from a tracing event.
+#[derive(Default)]
+struct MessageVisitor {
+    message: String,
+}
 
-        // Try to find level
-        let level = if prefix.contains("ERROR") {
-            "ERROR"
-        } else if prefix.contains("WARN") {
-            "WARN"
-        } else if prefix.contains("INFO") {
-            "INFO"
-        } else if prefix.contains("DEBUG") {
-            "DEBUG"
-        } else if prefix.contains("TRACE") {
-            "TRACE"
-        } else {
-            "INFO"
-        };
+impl Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        }
+    }
 
-        // Try to find target (last word before the bracket)
-        let target = prefix
-            .split_whitespace()
-            .last()
-            .unwrap_or("paporg")
-            .to_string();
-
-        (level.to_string(), target, message)
-    } else {
-        ("INFO".to_string(), "paporg".to_string(), line.to_string())
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        }
     }
 }
 
@@ -159,14 +154,5 @@ mod tests {
         let event = receiver.try_recv().unwrap();
         assert_eq!(event.level, "INFO");
         assert_eq!(event.message, "Hello");
-    }
-
-    #[test]
-    fn test_parse_log_line() {
-        let (level, target, message) =
-            parse_log_line("[2024-01-15T10:30:00Z INFO  paporg::worker] Processing document");
-        assert_eq!(level, "INFO");
-        assert_eq!(target, "paporg::worker");
-        assert_eq!(message, "Processing document");
     }
 }

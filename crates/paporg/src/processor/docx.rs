@@ -25,6 +25,7 @@ impl Default for DocxProcessor {
 
 impl DocumentProcessor for DocxProcessor {
     fn process(&self, path: &Path) -> Result<ProcessedContent, ProcessError> {
+        let _span = tracing::info_span!("processor.docx").entered();
         let file = std::fs::File::open(path).map_err(|e| ProcessError::ReadDocument {
             path: path.to_path_buf(),
             source: e,

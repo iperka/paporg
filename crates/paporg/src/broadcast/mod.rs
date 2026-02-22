@@ -13,4 +13,4 @@ pub use job_progress::{
     JobPhase, JobProgressBroadcaster, JobProgressEvent, JobProgressTracker, JobStatus,
 };
 pub use job_store::{JobListResponse, JobQueryParams, JobStore, StoredJob};
-pub use log_broadcaster::{BroadcastingLogWriter, LogBroadcaster, LogEvent};
+pub use log_broadcaster::{BroadcastLayer, LogBroadcaster, LogEvent};

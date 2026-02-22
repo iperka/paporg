@@ -444,6 +444,7 @@ impl GitRepository {
     // ========================================================================
 
     /// Pulls changes with progress reporting.
+    #[tracing::instrument(name = "git_pull", skip_all, fields(branch = %self.settings.branch))]
     pub async fn pull_with_progress(&self, progress: &OperationProgress) -> Result<PullResult> {
         if !self.is_git_repo() {
             return Err(GitOpsError::GitNotInitialized);
@@ -537,6 +538,7 @@ impl GitRepository {
     }
 
     /// Commits changes with progress reporting.
+    #[tracing::instrument(name = "git_commit", skip_all, fields(branch = %self.settings.branch))]
     pub async fn commit_with_progress(
         &self,
         message: &str,
@@ -616,6 +618,7 @@ impl GitRepository {
     }
 
     /// Pushes commits with progress reporting.
+    #[tracing::instrument(name = "git_push", skip_all, fields(branch = %self.settings.branch))]
     pub async fn push_with_progress(&self, progress: &OperationProgress) -> Result<()> {
         if !self.is_git_repo() {
             return Err(GitOpsError::GitNotInitialized);
@@ -698,6 +701,7 @@ impl GitRepository {
     }
 
     /// Fetches from remote with progress reporting.
+    #[tracing::instrument(name = "git_fetch", skip_all, fields(branch))]
     pub async fn fetch_with_progress(
         &self,
         branch: &str,

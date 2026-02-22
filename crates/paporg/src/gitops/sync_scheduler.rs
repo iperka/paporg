@@ -79,7 +79,14 @@ impl SyncScheduler {
                     }
 
                     let progress = broadcaster.start_operation(GitOperationType::Pull);
-                    match reconciler.reconcile(&progress).await {
+                    match {
+                        use tracing::Instrument;
+                        reconciler
+                            .reconcile(&progress)
+                            .instrument(tracing::info_span!("git_sync_tick"))
+                    }
+                    .await
+                    {
                         Ok(result) if result.pull_result.files_changed > 0 => {
                             log::info!(
                                 "Git sync: {} files changed",
