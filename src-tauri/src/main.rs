@@ -36,7 +36,11 @@ fn open_log_file(config_dir: &std::path::Path) -> Option<std::fs::File> {
     if let Ok(meta) = std::fs::metadata(&log_path) {
         if meta.len() > MAX_LOG_SIZE {
             let rotated = logs_dir.join("paporg.log.1");
-            let _ = std::fs::rename(&log_path, rotated);
+            // Remove existing rotated log (required on Windows where rename fails if dest exists)
+            let _ = std::fs::remove_file(&rotated);
+            if let Err(e) = std::fs::rename(&log_path, &rotated) {
+                eprintln!("Log rotation failed: {}", e);
+            }
         }
     }
 

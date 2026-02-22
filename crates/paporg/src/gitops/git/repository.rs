@@ -182,8 +182,12 @@ impl GitRepository {
         }
 
         // Configure git user for commits
-        let _ = self.run_git(&["config", "user.email", &self.settings.user_email]);
-        let _ = self.run_git(&["config", "user.name", &self.settings.user_name]);
+        if let Err(e) = self.run_git(&["config", "user.email", &self.settings.user_email]) {
+            tracing::warn!(email = %self.settings.user_email, "Failed to configure git user.email: {}", e);
+        }
+        if let Err(e) = self.run_git(&["config", "user.name", &self.settings.user_name]) {
+            tracing::warn!(name = %self.settings.user_name, "Failed to configure git user.name: {}", e);
+        }
 
         Ok(())
     }

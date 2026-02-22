@@ -319,10 +319,18 @@ impl TauriAppState {
 
         if !git_settings.enabled {
             info!("Git sync not started: git is disabled in settings");
+            // Clean up existing sync artifacts from a previous enabled state
+            if let Some(scheduler) = self.sync_scheduler.take() {
+                scheduler.stop();
+            }
+            if let Some(handle) = self.config_listener_handle.take() {
+                handle.abort();
+            }
+            self.reconciler = None;
             return Ok(());
         }
 
-        // Stop existing scheduler to prevent thread leak
+        // Stop existing scheduler to prevent thread leak on re-enable
         if let Some(scheduler) = self.sync_scheduler.take() {
             scheduler.stop();
         }

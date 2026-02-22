@@ -81,8 +81,6 @@ impl GitReconciler {
             }
         };
 
-        let mut last_error = None;
-
         for attempt in 0..=MAX_RETRIES {
             if attempt > 0 {
                 let delay = RETRY_BASE_DELAY_SECS * (1 << (attempt - 1)); // 2s, 4s, 8s
@@ -120,7 +118,6 @@ impl GitReconciler {
                 Err(e) => {
                     if e.is_retryable() && attempt < MAX_RETRIES {
                         log::warn!("Reconcile failed with retryable error: {}", e);
-                        last_error = Some(e);
                         continue;
                     }
                     return Err(e);
@@ -128,11 +125,7 @@ impl GitReconciler {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            crate::gitops::error::GitOpsError::GitOperation(
-                "Reconcile failed after all retries".to_string(),
-            )
-        }))
+        unreachable!("retry loop always returns: all iterations either succeed or fail with return")
     }
 }
 
