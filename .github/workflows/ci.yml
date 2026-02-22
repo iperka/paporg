@@ -158,7 +158,7 @@ jobs:
           key: ${{ runner.os }}-cargo-bin-tauri-cli
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --locked
+        run: command -v cargo-tauri >/dev/null 2>&1 || cargo install tauri-cli --locked
 
       - name: Build Tauri app (debug)
         run: cd src-tauri && cargo tauri build --debug --no-bundle --target x86_64-unknown-linux-gnu
