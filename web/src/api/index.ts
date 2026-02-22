@@ -504,6 +504,11 @@ export const api = {
       const response = await invoke<ApiResponse<RuleSuggestion>>('suggest_rule', { ocrText, filename });
       return unwrap(response);
     },
+
+    suggestCommitMessage: async (files: [string, string][], diff: string): Promise<string> => {
+      const response = await invoke<ApiResponse<string>>('suggest_commit_message', { files, diff });
+      return unwrap(response);
+    },
   },
 
   // ---------------------------------------------------------------------------

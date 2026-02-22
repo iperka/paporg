@@ -59,6 +59,14 @@ pub enum SuggesterError {
     MutexPoisoned,
 }
 
+/// Input data for commit message generation.
+pub struct CommitContext {
+    /// File paths with their git status codes (M, A, D, ?).
+    pub files: Vec<(String, String)>,
+    /// Unified diff of the changes (may be truncated).
+    pub diff: String,
+}
+
 /// Summary of an existing rule for AI context.
 #[derive(Debug, Clone)]
 pub struct ExistingRule {
@@ -172,10 +180,100 @@ impl RuleSuggester {
         let prompt = self.build_prompt_with_existing(ocr_text, filename, existing_rules);
         debug!("Generated prompt:\n{}", prompt);
 
-        let response = self.generate(&prompt)?;
+        let response = self.generate(&prompt, 512, Some("}]}"))?;
         debug!("LLM response:\n{}", response);
 
         self.parse_suggestions(&response)
+    }
+
+    /// Generates a conventional commit message from git changes.
+    pub fn generate_commit_message(
+        &self,
+        context: &CommitContext,
+    ) -> Result<String, SuggesterError> {
+        let prompt = self.build_commit_prompt(context);
+        debug!("Generated commit prompt:\n{}", prompt);
+
+        let response = self.generate(&prompt, 64, None)?;
+        debug!("LLM commit response:\n{}", response);
+
+        self.parse_commit_message(&response)
+    }
+
+    /// Builds a ChatML prompt for commit message generation.
+    fn build_commit_prompt(&self, context: &CommitContext) -> String {
+        let files_text: String = context
+            .files
+            .iter()
+            .map(|(status, path)| format!("  {} {}", sanitize_for_prompt(status), sanitize_for_prompt(path)))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let truncated_diff: String = sanitize_for_prompt(&context.diff)
+            .chars()
+            .take(1200)
+            .collect();
+
+        format!(
+            r#"<|im_start|>system
+You are a commit message generator. Write a single conventional commit message.
+
+RULES:
+- Format: type(scope): description
+- Types: feat, fix, chore, docs, refactor, style, test, perf, ci, build
+- Scope is optional, derived from the primary directory changed
+- Description: lowercase, imperative mood, no period, under 72 chars total
+- Output ONLY the commit message<|im_end|>
+<|im_start|>user
+Changed files:
+{files}
+
+Diff:
+{diff}<|im_end|>
+<|im_start|>assistant
+"#,
+            files = files_text,
+            diff = truncated_diff,
+        )
+    }
+
+    /// Parses the LLM response into a valid conventional commit message.
+    fn parse_commit_message(&self, response: &str) -> Result<String, SuggesterError> {
+        let first_line = response
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or(response.trim())
+            .trim()
+            .trim_matches('"')
+            .trim();
+
+        if first_line.is_empty() {
+            return Err(SuggesterError::ResponseParse(
+                "Empty commit message from LLM".to_string(),
+            ));
+        }
+
+        // Valid conventional commit prefixes
+        const TYPES: &[&str] = &[
+            "feat", "fix", "chore", "docs", "refactor", "style", "test", "perf", "ci", "build",
+        ];
+
+        // Check if the message starts with a valid type
+        let is_valid = TYPES.iter().any(|t| {
+            first_line.starts_with(&format!("{}:", t))
+                || first_line.starts_with(&format!("{}(", t))
+        });
+
+        let message = if is_valid {
+            // Truncate to 72 chars
+            first_line.chars().take(72).collect()
+        } else {
+            // Fallback: wrap in chore:
+            let desc: String = first_line.chars().take(65).collect();
+            format!("chore: {}", desc)
+        };
+
+        Ok(message)
     }
 
     /// Builds the prompt for the LLM with existing rules context.
@@ -272,7 +370,10 @@ For UPDATING existing rules, use:
     }
 
     /// Generates text from the LLM.
-    fn generate(&self, prompt: &str) -> Result<String, SuggesterError> {
+    ///
+    /// - `max_tokens`: maximum number of tokens to generate.
+    /// - `early_stop`: optional substring that triggers early termination when found in output.
+    fn generate(&self, prompt: &str, max_tokens: usize, early_stop: Option<&str>) -> Result<String, SuggesterError> {
         // Create context for this generation
         let mut ctx = self
             .model
@@ -303,7 +404,6 @@ For UPDATING existing rules, use:
 
         // Generate tokens
         let mut output = String::new();
-        let max_tokens = 512;
         let mut n_cur = n_tokens;
 
         for _ in 0..max_tokens {
@@ -331,10 +431,15 @@ For UPDATING existing rules, use:
 
             output.push_str(&token_str);
 
-            // Check if we've generated complete JSON
-            if output.contains("}]}")
-                || (output.contains("\"suggestions\"") && output.ends_with("]}"))
-            {
+            // Check for early stop condition
+            if let Some(stop) = early_stop {
+                if output.contains(stop) {
+                    break;
+                }
+            }
+
+            // Also stop on newline for single-line outputs (commit messages)
+            if early_stop.is_none() && output.contains('\n') {
                 break;
             }
 
@@ -479,6 +584,23 @@ impl SuggesterPool {
             Some(suggester) => {
                 suggester.suggest_rules_with_existing(ocr_text, filename, existing_rules)
             }
+            None => Err(SuggesterError::BackendInit(
+                "Suggester not initialized".to_string(),
+            )),
+        }
+    }
+
+    /// Generates a commit message using the cached suggester.
+    pub fn generate_commit_message(
+        &self,
+        context: &CommitContext,
+    ) -> Result<String, SuggesterError> {
+        let guard = self
+            .suggester
+            .lock()
+            .map_err(|_| SuggesterError::MutexPoisoned)?;
+        match guard.as_ref() {
+            Some(suggester) => suggester.generate_commit_message(context),
             None => Err(SuggesterError::BackendInit(
                 "Suggester not initialized".to_string(),
             )),

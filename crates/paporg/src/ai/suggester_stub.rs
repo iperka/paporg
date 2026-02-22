@@ -162,6 +162,14 @@ const PATTERNS: &[DocumentPattern] = &[
     },
 ];
 
+/// Input data for commit message generation.
+pub struct CommitContext {
+    /// File paths with their git status codes (M, A, D, ?).
+    pub files: Vec<(String, String)>,
+    /// Unified diff of the changes (may be truncated).
+    pub diff: String,
+}
+
 /// Summary of an existing rule for AI context.
 #[derive(Debug, Clone)]
 pub struct ExistingRule {
@@ -231,6 +239,45 @@ impl RuleSuggester {
         filename: &str,
     ) -> Result<Vec<RuleSuggestion>, SuggesterError> {
         self.suggest_rules_with_existing(ocr_text, filename, &[])
+    }
+
+    /// Generates a basic commit message from file paths.
+    pub fn generate_commit_message(
+        &self,
+        context: &CommitContext,
+    ) -> Result<String, SuggesterError> {
+        if context.files.is_empty() {
+            return Err(SuggesterError::NoMatch);
+        }
+
+        // Determine type from statuses
+        let has_new = context.files.iter().any(|(s, _)| s == "A" || s == "?");
+        let has_deleted = context.files.iter().any(|(s, _)| s == "D");
+        let commit_type = if has_new && !has_deleted {
+            "feat"
+        } else {
+            "chore"
+        };
+
+        // Build file list description
+        let filenames: Vec<&str> = context
+            .files
+            .iter()
+            .map(|(_, path)| {
+                path.rsplit('/')
+                    .next()
+                    .unwrap_or(path.as_str())
+            })
+            .collect();
+
+        let desc = if filenames.len() <= 3 {
+            filenames.join(", ")
+        } else {
+            let first_three = filenames[..3].join(", ");
+            format!("{} and {} more", first_three, filenames.len() - 3)
+        };
+
+        Ok(format!("{}: update {}", commit_type, desc))
     }
 
     /// Suggests rules with existing rules context using keyword pattern matching.
@@ -366,6 +413,14 @@ impl SuggesterPool {
     ) -> Result<Vec<RuleSuggestion>, SuggesterError> {
         self.suggester
             .suggest_rules_with_existing(ocr_text, filename, existing_rules)
+    }
+
+    /// Generates a commit message using the pattern-based suggester.
+    pub fn generate_commit_message(
+        &self,
+        context: &CommitContext,
+    ) -> Result<String, SuggesterError> {
+        self.suggester.generate_commit_message(context)
     }
 
     /// Checks if the suggester is initialized (always true for pattern-based suggester).
