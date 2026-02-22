@@ -446,6 +446,7 @@ pub fn ensure_config_initialized(config_dir: &PathBuf) -> Result<(), String> {
     // Create subdirectories
     let rules_dir = config_dir.join("rules");
     let sources_dir = config_dir.join("sources");
+    let variables_dir = config_dir.join("variables");
 
     if !rules_dir.exists() {
         fs::create_dir_all(&rules_dir)
@@ -454,6 +455,10 @@ pub fn ensure_config_initialized(config_dir: &PathBuf) -> Result<(), String> {
     if !sources_dir.exists() {
         fs::create_dir_all(&sources_dir)
             .map_err(|e| format!("Failed to create sources directory: {}", e))?;
+    }
+    if !variables_dir.exists() {
+        fs::create_dir_all(&variables_dir)
+            .map_err(|e| format!("Failed to create variables directory: {}", e))?;
     }
 
     // Create default settings file if it doesn't exist
@@ -557,6 +562,102 @@ spec:
 "#;
         if let Err(e) = fs::write(&sample_rule_path, sample_rule) {
             warn!("Failed to write sample rule: {}", e);
+        }
+    }
+
+    // Create default variable files if no variables exist
+    if fs::read_dir(&variables_dir)
+        .map(|mut d| d.next().is_none())
+        .unwrap_or(true)
+    {
+        info!("Creating default variables");
+
+        let default_variables: &[(&str, &str)] = &[
+            (
+                "iban.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: iban
+spec:
+  pattern: "(?P<iban>[A-Z]{2}\\d{2}[\\s]?[\\dA-Z]{4}[\\s]?(?:[\\dA-Z]{4}[\\s]?){2,7}[\\dA-Z]{1,4})"
+  transform: uppercase
+"#,
+            ),
+            (
+                "date.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: date
+spec:
+  pattern: "(?P<date>\\d{1,2}[./\\-]\\d{1,2}[./\\-]\\d{2,4})"
+"#,
+            ),
+            (
+                "amount.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: amount
+spec:
+  pattern: "(?:Total|Amount|Sum|Betrag|Summe)[:\\s]*(?P<amount>[\\d',]+\\.\\d{2})"
+  transform: trim
+"#,
+            ),
+            (
+                "invoice-number.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: invoice-number
+spec:
+  pattern: "(?i)(?:Invoice|Rechnung|Facture)[\\s#:.-]*(?P<invoice_number>[A-Z0-9][A-Z0-9\\-/.]{2,20})"
+  transform: uppercase
+"#,
+            ),
+            (
+                "vendor.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: vendor
+spec:
+  pattern: "(?i)(?:from|von|sender|company|firma)[:\\s]+(?P<vendor>[A-Za-z0-9][A-Za-z0-9\\s&.,'-]+)"
+  transform: slugify
+  default: unknown
+"#,
+            ),
+            (
+                "email.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: email
+spec:
+  pattern: "(?P<email>[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,})"
+  transform: lowercase
+"#,
+            ),
+            (
+                "currency.yaml",
+                r#"apiVersion: paporg.io/v1
+kind: Variable
+metadata:
+  name: currency
+spec:
+  pattern: "(?P<currency>CHF|EUR|USD|GBP|JPY|CAD|AUD)"
+  transform: uppercase
+  default: CHF
+"#,
+            ),
+        ];
+
+        for (filename, content) in default_variables {
+            let path = variables_dir.join(filename);
+            if let Err(e) = fs::write(&path, content) {
+                warn!("Failed to write default variable {}: {}", filename, e);
+            }
         }
     }
 
