@@ -50,9 +50,11 @@ uuid = { version = "1.8", features = ["v4"] }
 thiserror.workspace = true
 mime_guess = "2.0"
 
-# Logging
+# Logging / Tracing
 log.workspace = true
-env_logger = "0.11"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-log.workspace = true
 
 # Database (SeaORM)
 sea-orm = { version = "1.0", features = ["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"] }
@@ -88,9 +90,27 @@ getrandom = "0.2"
 # TTL cache for pending OAuth authorizations
 moka = { version = "0.12", features = ["sync"] }
 
+# OpenTelemetry (optional, behind `otel` feature)
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.29", optional = true }
+tracing-loki = { version = "0.2", optional = true }
+
+# Continuous profiling (optional, behind `otel` feature)
+pprof = { version = "0.14", features = ["flamegraph", "prost-codec"], optional = true }
+
 [features]
 default = []
 ai = ["llama-cpp-2", "hf-hub"]
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-loki",
+    "dep:pprof",
+]
 
 [dev-dependencies]
 tempfile = "3.10"

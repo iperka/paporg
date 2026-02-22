@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { GitCommit, Loader2, Check, X } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { GitCommit, Loader2, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,6 +7,7 @@ import { useGitOps } from '@/contexts/GitOpsContext'
 import { useGitProgressContext } from '@/contexts/GitProgressContext'
 import { getPhaseLabel } from '@/types/gitops'
 import { cn } from '@/lib/utils'
+import { api } from '@/api'
 
 interface CommitDialogProps {
   open: boolean
@@ -20,6 +21,21 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
   const [message, setMessage] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [currentOperationId, setCurrentOperationId] = useState<string | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [diffFile, setDiffFile] = useState<string | null>(null)
+  const [diffContent, setDiffContent] = useState<string | null>(null)
+  const [isDiffLoading, setIsDiffLoading] = useState(false)
+
+  // All files from git status
+  const allFiles = useMemo(() => {
+    if (!gitStatus) return []
+    return [
+      ...gitStatus.modifiedFiles.map((f) => ({ path: f, type: 'M' as const })),
+      ...gitStatus.untrackedFiles
+        .filter((f) => !gitStatus.modifiedFiles.includes(f))
+        .map((f) => ({ path: f, type: 'A' as const })),
+    ]
+  }, [gitStatus])
 
   // Get the current operation progress if we have one
   const currentProgress = useMemo(() => {
@@ -41,13 +57,17 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       setMessage('')
       setLocalError(null)
       setCurrentOperationId(null)
+      setDiffFile(null)
+      setDiffContent(null)
+      // Select all files by default
+      setSelectedFiles(new Set(allFiles.map((f) => f.path)))
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   // Watch for new commit operations starting
   useEffect(() => {
     if (isLoading && !currentOperationId) {
-      // Find any commit operation that started recently
       for (const [id, op] of activeOperations) {
         if (op.operationType === 'commit' && !currentOperationId) {
           setCurrentOperationId(id)
@@ -67,6 +87,44 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
     }
   }, [isCompleted, onOpenChange])
 
+  const toggleFile = useCallback((path: string) => {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }, [])
+
+  const toggleAll = useCallback(() => {
+    if (selectedFiles.size === allFiles.length) {
+      setSelectedFiles(new Set())
+    } else {
+      setSelectedFiles(new Set(allFiles.map((f) => f.path)))
+    }
+  }, [selectedFiles.size, allFiles])
+
+  const showDiff = useCallback(async (path: string) => {
+    if (diffFile === path) {
+      setDiffFile(null)
+      setDiffContent(null)
+      return
+    }
+    setDiffFile(path)
+    setIsDiffLoading(true)
+    try {
+      const diff = await api.git.diff(path)
+      setDiffContent(diff || '(new file)')
+    } catch {
+      setDiffContent('(failed to load diff)')
+    } finally {
+      setIsDiffLoading(false)
+    }
+  }, [diffFile])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -75,17 +133,23 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       return
     }
 
+    if (selectedFiles.size === 0) {
+      setLocalError('Select at least one file to commit')
+      return
+    }
+
     setLocalError(null)
-    setCurrentOperationId(null) // Clear so we pick up the new one
-    await gitCommit(message)
-    // Result handling is done via progress context
+    setCurrentOperationId(null)
+
+    // If all files selected, pass undefined (commit all)
+    const files = selectedFiles.size === allFiles.length
+      ? undefined
+      : Array.from(selectedFiles)
+
+    await gitCommit(message, files)
   }
 
   if (!open) return null
-
-  const totalChanges = gitStatus
-    ? gitStatus.modifiedFiles.length + gitStatus.untrackedFiles.length
-    : 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -96,7 +160,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       />
 
       {/* Dialog */}
-      <div className="relative z-50 w-full max-w-md bg-background border rounded-lg shadow-lg p-6">
+      <div className="relative z-50 w-full max-w-lg bg-background border rounded-lg shadow-lg p-6">
         <div className="flex items-center gap-2 mb-4">
           <GitCommit className="h-5 w-5" />
           <h2 className="text-lg font-semibold">Commit Changes</h2>
@@ -148,23 +212,80 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
           </div>
         )}
 
-        {/* Changed files summary - hide when in progress */}
-        {!currentProgress && gitStatus && totalChanges > 0 && (
+        {/* File staging - hide when in progress */}
+        {!currentProgress && allFiles.length > 0 && (
           <div className="mb-4 p-3 bg-muted rounded-md text-sm">
-            <p className="font-medium mb-2">
-              {totalChanges} file{totalChanges !== 1 ? 's' : ''} to commit:
-            </p>
-            <ul className="space-y-1 max-h-32 overflow-y-auto">
-              {gitStatus.modifiedFiles.map((file) => (
-                <li key={file} className="flex items-center gap-2">
-                  <span className="text-yellow-600">M</span>
-                  <span className="truncate">{file}</span>
-                </li>
-              ))}
-              {gitStatus.untrackedFiles.map((file) => (
-                <li key={file} className="flex items-center gap-2">
-                  <span className="text-green-600">A</span>
-                  <span className="truncate">{file}</span>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-medium">
+                {selectedFiles.size} of {allFiles.length} file{allFiles.length !== 1 ? 's' : ''} selected
+              </p>
+              <button
+                type="button"
+                className="text-xs text-primary hover:underline"
+                onClick={toggleAll}
+                disabled={isInProgress}
+              >
+                {selectedFiles.size === allFiles.length ? 'Deselect all' : 'Select all'}
+              </button>
+            </div>
+            <ul className="space-y-0.5 max-h-48 overflow-y-auto">
+              {allFiles.map((file) => (
+                <li key={file.path}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedFiles.has(file.path)}
+                      onChange={() => toggleFile(file.path)}
+                      disabled={isInProgress}
+                      className="rounded border-muted-foreground/50"
+                    />
+                    <span className={file.type === 'M' ? 'text-yellow-600' : 'text-green-600'}>
+                      {file.type === 'M' ? 'M' : 'A'}
+                    </span>
+                    <button
+                      type="button"
+                      className="truncate text-left flex-1 hover:underline text-xs font-mono"
+                      onClick={() => showDiff(file.path)}
+                    >
+                      {file.path}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground shrink-0"
+                      onClick={() => showDiff(file.path)}
+                    >
+                      {diffFile === file.path ? (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                  {/* Inline diff */}
+                  {diffFile === file.path && (
+                    <div className="mt-1 ml-6 mb-2">
+                      {isDiffLoading ? (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Loading diff...
+                        </div>
+                      ) : (
+                        <pre className="text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto rounded bg-background p-2 border">
+                          {diffContent?.split('\n').map((line, i) => {
+                            let color = ''
+                            if (line.startsWith('+') && !line.startsWith('+++')) color = 'text-green-600'
+                            else if (line.startsWith('-') && !line.startsWith('---')) color = 'text-red-600'
+                            else if (line.startsWith('@@')) color = 'text-blue-500'
+                            return (
+                              <div key={i} className={color}>
+                                {line}
+                              </div>
+                            )
+                          })}
+                        </pre>
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -199,7 +320,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
               {isCompleted ? 'Close' : 'Cancel'}
             </Button>
             {!isCompleted && (
-              <Button type="submit" disabled={isLoading || isInProgress || !message.trim()}>
+              <Button type="submit" disabled={isLoading || isInProgress || !message.trim() || selectedFiles.size === 0}>
                 {isInProgress ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

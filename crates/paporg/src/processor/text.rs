@@ -20,6 +20,7 @@ impl Default for TextProcessor {
 
 impl DocumentProcessor for TextProcessor {
     fn process(&self, path: &Path) -> Result<ProcessedContent, ProcessError> {
+        let _span = tracing::info_span!("processor.text").entered();
         let text = std::fs::read_to_string(path).map_err(|e| ProcessError::ReadDocument {
             path: path.to_path_buf(),
             source: e,

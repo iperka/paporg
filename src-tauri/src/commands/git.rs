@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use paporg::gitops::git::{
-    BranchInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus, PullResult,
+    BranchInfo, CommitInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus,
+    PullResult,
 };
 use paporg::gitops::progress::GitOperationType;
 use tauri::State;
@@ -11,6 +12,37 @@ use tokio::sync::RwLock;
 
 use super::ApiResponse;
 use crate::state::TauriAppState;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Helper to reload config and emit a config-changed event.
+/// Used by commands that modify the working tree (checkout, merge, initialize).
+async fn reload_and_notify(app: &tauri::AppHandle, state: &State<'_, Arc<RwLock<TauriAppState>>>) {
+    let mut state_write = state.write().await;
+    if let Err(e) = state_write.reload() {
+        log::error!("Failed to reload config after git operation: {}", e);
+    }
+    drop(state_write);
+    crate::events::emit_config_changed(app);
+}
+
+/// Helper to create a GitRepository from current state.
+/// Returns None with an error response if state is not ready.
+fn make_repo(state: &TauriAppState) -> Result<GitRepository, ApiResponse<()>> {
+    let config_dir = state
+        .config_dir
+        .as_ref()
+        .ok_or_else(|| ApiResponse::err("No config directory set"))?;
+
+    let git_settings = state
+        .config()
+        .map(|c| c.settings.resource.spec.git.clone())
+        .ok_or_else(|| ApiResponse::err("Configuration not loaded"))?;
+
+    Ok(GitRepository::new(config_dir, git_settings))
+}
 
 // ============================================================================
 // Commands
@@ -23,19 +55,11 @@ pub async fn git_status(
 ) -> Result<ApiResponse<GitStatus>, String> {
     let state = state.read().await;
 
-    let config_dir = match &state.config_dir {
-        Some(dir) => dir.clone(),
-        None => return Ok(ApiResponse::err("No config directory set")),
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
     };
 
-    let git_settings = state
-        .config()
-        .map(|c| c.settings.resource.spec.git.clone())
-        .unwrap_or_default();
-
-    let repo = GitRepository::new(&config_dir, git_settings);
-
-    // Return a default status if not a git repo (instead of error)
     if !repo.is_git_repo() {
         return Ok(ApiResponse::ok(GitStatus {
             is_repo: false,
@@ -55,50 +79,33 @@ pub async fn git_status(
     }
 }
 
-/// Git pull.
+/// Git pull — uses the reconciler so reload+notify happens automatically.
 #[tauri::command]
 pub async fn git_pull(
-    app: tauri::AppHandle,
     state: State<'_, Arc<RwLock<TauriAppState>>>,
 ) -> Result<ApiResponse<PullResult>, String> {
     let state_guard = state.read().await;
 
-    let config_dir = match &state_guard.config_dir {
-        Some(dir) => dir.clone(),
-        None => return Ok(ApiResponse::err("No config directory set")),
+    let reconciler = match &state_guard.reconciler {
+        Some(r) => Arc::clone(r),
+        None => {
+            return Ok(ApiResponse::err(
+                "Git not initialized. Run initialize first.",
+            ))
+        }
     };
 
-    let git_settings = match state_guard.config() {
-        Some(c) => c.settings.resource.spec.git.clone(),
-        None => return Ok(ApiResponse::err("Configuration not loaded")),
-    };
-
-    if !git_settings.enabled {
-        return Ok(ApiResponse::err("Git is not enabled in settings"));
-    }
-
-    let git_broadcaster = state_guard.git_broadcaster.clone();
+    let broadcaster = state_guard.git_broadcaster.clone();
     drop(state_guard);
 
-    let repo = GitRepository::new(&config_dir, git_settings);
-    let progress = git_broadcaster.start_operation(GitOperationType::Pull);
-
-    match repo.pull_with_progress(&progress).await {
-        Ok(result) => {
-            if result.files_changed > 0 {
-                // Reload config
-                let mut state_write = state.write().await;
-                if let Err(e) = state_write.reload() {
-                    log::error!("Failed to reload config after git operation: {}", e);
-                }
-                drop(state_write);
-
-                crate::events::emit_config_changed(&app);
-            }
-            Ok(ApiResponse::ok(result))
-        }
+    let progress = broadcaster.start_operation(GitOperationType::Pull);
+    let op_id = progress.operation_id().to_string();
+    let result = match reconciler.reconcile(&progress).await {
+        Ok(result) => Ok(ApiResponse::ok(result.pull_result)),
         Err(e) => Ok(ApiResponse::err(e.to_string())),
-    }
+    };
+    broadcaster.complete_operation(&op_id);
+    result
 }
 
 /// Git commit and push.
@@ -130,12 +137,13 @@ pub async fn git_commit(
 
     let repo = GitRepository::new(&config_dir, git_settings);
     let progress = git_broadcaster.start_operation(GitOperationType::Commit);
+    let op_id = progress.operation_id().to_string();
 
     let files_ref: Option<Vec<&str>> = files
         .as_ref()
         .map(|f| f.iter().map(|s| s.as_str()).collect());
 
-    match repo
+    let result = match repo
         .commit_and_push_with_progress(&message, files_ref.as_deref(), &progress)
         .await
     {
@@ -146,7 +154,9 @@ pub async fn git_commit(
             Ok(ApiResponse::ok(result))
         }
         Err(e) => Ok(ApiResponse::err(e.to_string())),
-    }
+    };
+    git_broadcaster.complete_operation(&op_id);
+    result
 }
 
 /// List branches.
@@ -156,19 +166,11 @@ pub async fn git_branches(
 ) -> Result<ApiResponse<Vec<BranchInfo>>, String> {
     let state = state.read().await;
 
-    let config_dir = match &state.config_dir {
-        Some(dir) => dir.clone(),
-        None => return Ok(ApiResponse::err("No config directory set")),
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
     };
 
-    let git_settings = state
-        .config()
-        .map(|c| c.settings.resource.spec.git.clone())
-        .unwrap_or_default();
-
-    let repo = GitRepository::new(&config_dir, git_settings);
-
-    // Return empty list if not a git repo (instead of error)
     if !repo.is_git_repo() {
         return Ok(ApiResponse::ok(Vec::new()));
     }
@@ -188,30 +190,15 @@ pub async fn git_checkout(
 ) -> Result<ApiResponse<()>, String> {
     let state_guard = state.read().await;
 
-    let config_dir = match &state_guard.config_dir {
-        Some(dir) => dir.clone(),
-        None => return Ok(ApiResponse::err("No config directory set")),
+    let repo = match make_repo(&state_guard) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
     };
-
-    let git_settings = state_guard
-        .config()
-        .map(|c| c.settings.resource.spec.git.clone())
-        .unwrap_or_default();
-
     drop(state_guard);
-
-    let repo = GitRepository::new(&config_dir, git_settings);
 
     match repo.checkout(&branch) {
         Ok(()) => {
-            // Reload config
-            let mut state_write = state.write().await;
-            if let Err(e) = state_write.reload() {
-                log::error!("Failed to reload config after git operation: {}", e);
-            }
-            drop(state_write);
-
-            crate::events::emit_config_changed(&app);
+            reload_and_notify(&app, &state).await;
             Ok(ApiResponse::ok(()))
         }
         Err(e) => Ok(ApiResponse::err(e.to_string())),
@@ -228,31 +215,18 @@ pub async fn git_create_branch(
 ) -> Result<ApiResponse<()>, String> {
     let state_guard = state.read().await;
 
-    let config_dir = match &state_guard.config_dir {
-        Some(dir) => dir.clone(),
-        None => return Ok(ApiResponse::err("No config directory set")),
+    let repo = match make_repo(&state_guard) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
     };
-
-    let git_settings = state_guard
-        .config()
-        .map(|c| c.settings.resource.spec.git.clone())
-        .unwrap_or_default();
-
     drop(state_guard);
-
-    let repo = GitRepository::new(&config_dir, git_settings);
 
     match repo.create_branch(&name, checkout) {
         Ok(()) => {
             if checkout {
-                // Reload config
-                let mut state_write = state.write().await;
-                if let Err(e) = state_write.reload() {
-                    log::error!("Failed to reload config after git operation: {}", e);
-                }
-                drop(state_write);
+                reload_and_notify(&app, &state).await;
             }
-            crate::events::emit_config_changed(&app);
+            // No event when checkout=false — only branch metadata changed, not config
             Ok(ApiResponse::ok(()))
         }
         Err(e) => Ok(ApiResponse::err(e.to_string())),
@@ -285,6 +259,64 @@ pub async fn git_merge_status(
 
     match repo.merge_status(&branch) {
         Ok(status) => Ok(ApiResponse::ok(status)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Get git log (recent commits).
+#[tauri::command]
+pub async fn git_log(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    limit: Option<u32>,
+) -> Result<ApiResponse<Vec<CommitInfo>>, String> {
+    let state = state.read().await;
+
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
+    };
+
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(Vec::new()));
+    }
+
+    match repo.log(limit.unwrap_or(20)) {
+        Ok(commits) => Ok(ApiResponse::ok(commits)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Cancel an active git operation.
+#[tauri::command]
+pub async fn git_cancel_operation(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    operation_id: String,
+) -> Result<ApiResponse<bool>, String> {
+    let state = state.read().await;
+    let cancelled = state.git_broadcaster.cancel_operation(&operation_id);
+    Ok(ApiResponse::ok(cancelled))
+}
+
+/// Get diff for a file or all files.
+#[tauri::command]
+pub async fn git_diff(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    file: Option<String>,
+    cached: Option<bool>,
+) -> Result<ApiResponse<String>, String> {
+    let state = state.read().await;
+
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
+    };
+
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(String::new()));
+    }
+
+    match repo.diff(file.as_deref(), cached.unwrap_or(false)) {
+        Ok(diff) => Ok(ApiResponse::ok(diff)),
         Err(e) => Ok(ApiResponse::err(e.to_string())),
     }
 }
@@ -328,7 +360,7 @@ pub async fn git_initialize(
         }
     }
 
-    // Step 2: Set remote if not set
+    // Step 2: Set remote
     if let Err(e) = repo.set_remote(&remote_url) {
         return Ok(ApiResponse::err(format!("Failed to set remote: {}", e)));
     }
@@ -337,6 +369,13 @@ pub async fn git_initialize(
     if let Err(e) = repo.fetch(&branch) {
         let error_msg = e.to_string();
         if error_msg.contains("couldn't find remote ref") || error_msg.contains("not found") {
+            // Set up reconciler now that git is initialized
+            let mut state_write = state.write().await;
+            if let Err(e) = state_write.setup_git_sync(&app, Arc::clone(&*state)) {
+                log::warn!("Failed to setup git sync: {}", e);
+            }
+            drop(state_write);
+
             return Ok(ApiResponse::ok(InitializeResult {
                 initialized: true,
                 merged: false,
@@ -357,13 +396,14 @@ pub async fn git_initialize(
     if !has_local_commits {
         match repo.checkout_remote_branch(&branch) {
             Ok(()) => {
+                reload_and_notify(&app, &state).await;
+
+                // Set up reconciler now that git is initialized
                 let mut state_write = state.write().await;
-                if let Err(e) = state_write.reload() {
-                    log::error!("Failed to reload config after git operation: {}", e);
+                if let Err(e) = state_write.setup_git_sync(&app, Arc::clone(&*state)) {
+                    log::warn!("Failed to setup git sync: {}", e);
                 }
                 drop(state_write);
-
-                crate::events::emit_config_changed(&app);
 
                 return Ok(ApiResponse::ok(InitializeResult {
                     initialized: true,
@@ -393,6 +433,13 @@ pub async fn git_initialize(
     };
 
     if merge_status.behind == 0 {
+        // Set up reconciler
+        let mut state_write = state.write().await;
+        if let Err(e) = state_write.setup_git_sync(&app, Arc::clone(&*state)) {
+            log::warn!("Failed to setup git sync: {}", e);
+        }
+        drop(state_write);
+
         return Ok(ApiResponse::ok(InitializeResult {
             initialized: true,
             merged: false,
@@ -414,13 +461,14 @@ pub async fn git_initialize(
     match repo.merge(&branch) {
         Ok(result) => {
             if result.success {
+                reload_and_notify(&app, &state).await;
+
+                // Set up reconciler
                 let mut state_write = state.write().await;
-                if let Err(e) = state_write.reload() {
-                    log::error!("Failed to reload config after git operation: {}", e);
+                if let Err(e) = state_write.setup_git_sync(&app, Arc::clone(&*state)) {
+                    log::warn!("Failed to setup git sync: {}", e);
                 }
                 drop(state_write);
-
-                crate::events::emit_config_changed(&app);
 
                 Ok(ApiResponse::ok(InitializeResult {
                     initialized: true,

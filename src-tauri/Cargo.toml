@@ -23,7 +23,9 @@ serde_json.workspace = true
 serde_yaml = "0.9"
 tokio.workspace = true
 log.workspace = true
-env_logger = "0.11"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-log.workspace = true
 chrono.workspace = true
 regex = "1.10"
 secrecy = "0.10"
@@ -36,9 +38,24 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # Import paporg as library
 paporg = { path = "../crates/paporg" }
 
+# OpenTelemetry (optional, behind `otel` feature)
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.29", optional = true }
+tracing-loki = { version = "0.2", optional = true }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 ai = ["paporg/ai"]
+otel = [
+    "paporg/otel",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-loki",
+]
 # Enable devtools for development builds only
 devtools = ["tauri/devtools"]

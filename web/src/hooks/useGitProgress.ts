@@ -17,7 +17,8 @@ interface UseGitProgressReturn {
   clearCompleted: () => void
 }
 
-const COMPLETION_DISPLAY_TIME = 3000 // How long to show completed operations (ms)
+const COMPLETION_DISPLAY_TIME = 5000 // How long to show completed operations (ms)
+const MAX_HISTORY_SIZE = 20 // Maximum number of operations to keep in history
 
 // Valid operation types and phases for validation
 const VALID_OPERATION_TYPES = new Set([
@@ -91,6 +92,11 @@ export function useGitProgress(): UseGitProgressReturn {
     setActiveOperations((prev) => {
       const next = new Map(prev)
       next.set(event.operationId, event)
+      // Enforce bounded history
+      if (next.size > MAX_HISTORY_SIZE) {
+        const oldest = next.keys().next().value
+        if (oldest !== undefined) next.delete(oldest)
+      }
       return next
     })
 

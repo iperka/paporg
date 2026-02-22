@@ -18,24 +18,52 @@ impl PdfProcessor {
 
 impl DocumentProcessor for PdfProcessor {
     fn process(&self, path: &Path) -> Result<ProcessedContent, ProcessError> {
+        let _span = tracing::info_span!("processor.pdf").entered();
+
         let pdf_bytes = std::fs::read(path).map_err(|e| ProcessError::ReadDocument {
             path: path.to_path_buf(),
             source: e,
         })?;
 
-        let doc = lopdf::Document::load_mem(&pdf_bytes)
-            .map_err(|e| ProcessError::PdfProcessing(format!("Failed to load PDF: {}", e)))?;
+        let text = match lopdf::Document::load_mem(&pdf_bytes) {
+            Ok(doc) => {
+                // Extract text from PDF
+                let mut text = extract_text_from_pdf(&doc)?;
 
-        // Extract text from PDF
-        let mut text = extract_text_from_pdf(&doc)?;
-
-        // If no usable text was extracted and OCR is available, try OCR
-        // Check for empty text or garbled text from font encoding issues
-        if should_use_ocr(&text) {
-            if let Some(ref ocr) = self.ocr {
-                text = self.ocr_pdf(&pdf_bytes, &doc, ocr)?;
+                // If no usable text was extracted and OCR is available, try OCR
+                if should_use_ocr(&text) {
+                    if let Some(ref ocr) = self.ocr {
+                        let _ocr_span =
+                            tracing::info_span!("processor.ocr_fallback", reason = "text_quality")
+                                .entered();
+                        text = self.ocr_pdf(&pdf_bytes, &doc, ocr)?;
+                    }
+                }
+                text
             }
-        }
+            Err(e) => {
+                // lopdf can't parse this PDF (e.g. invalid cross-reference table).
+                // Fall back to OCR via pdftoppm/poppler which handles more PDF variants.
+                tracing::warn!(
+                    "lopdf failed to parse {}: {}. Falling back to OCR.",
+                    path.display(),
+                    e
+                );
+                if let Some(ref ocr) = self.ocr {
+                    let _ocr_span = tracing::info_span!(
+                        "processor.ocr_fallback",
+                        reason = "lopdf_parse_failed"
+                    )
+                    .entered();
+                    self.ocr_pdf_without_doc(&pdf_bytes, ocr)?
+                } else {
+                    return Err(ProcessError::PdfProcessing(format!(
+                        "Failed to load PDF: {}. OCR fallback unavailable.",
+                        e
+                    )));
+                }
+            }
+        };
 
         let filename = path
             .file_name()
@@ -64,20 +92,50 @@ impl PdfProcessor {
         doc: &lopdf::Document,
         ocr: &OcrProcessor,
     ) -> Result<String, ProcessError> {
-        let mut all_text = String::new();
-
-        // Get page count
         let page_count = doc.get_pages().len();
+        self.ocr_pages(pdf_bytes, page_count, ocr)
+    }
 
-        // For each page, render to image and OCR
+    /// OCR a PDF when lopdf can't parse it. Uses pdftoppm to discover page count.
+    fn ocr_pdf_without_doc(
+        &self,
+        pdf_bytes: &[u8],
+        ocr: &OcrProcessor,
+    ) -> Result<String, ProcessError> {
+        let page_count = count_pdf_pages(pdf_bytes)?;
+        self.ocr_pages(pdf_bytes, page_count, ocr)
+    }
+
+    fn ocr_pages(
+        &self,
+        pdf_bytes: &[u8],
+        page_count: usize,
+        ocr: &OcrProcessor,
+    ) -> Result<String, ProcessError> {
+        let mut all_text = String::new();
+        let mut successes = 0;
+
         for page_num in 1..=page_count {
-            if let Ok(image_data) = render_pdf_page_to_image(pdf_bytes, page_num as u32, ocr.dpi())
-            {
-                if let Ok(page_text) = ocr.process_image_bytes(&image_data) {
-                    all_text.push_str(&page_text);
-                    all_text.push('\n');
+            match render_pdf_page_to_image(pdf_bytes, page_num as u32, ocr.dpi()) {
+                Ok(image_data) => match ocr.process_image_bytes(&image_data) {
+                    Ok(page_text) => {
+                        all_text.push_str(&page_text);
+                        all_text.push('\n');
+                        successes += 1;
+                    }
+                    Err(e) => tracing::warn!(page = page_num, "OCR failed for page: {}", e),
+                },
+                Err(e) => {
+                    tracing::warn!(page = page_num, "Failed to render page to image: {}", e)
                 }
             }
+        }
+
+        if successes == 0 && page_count > 0 {
+            return Err(ProcessError::PdfProcessing(format!(
+                "OCR failed on all {} pages",
+                page_count
+            )));
         }
 
         Ok(all_text)
@@ -144,6 +202,83 @@ fn should_use_ocr(text: &str) -> bool {
     }
 
     false
+}
+
+/// Timeout for pdfinfo command (30 seconds).
+const PDFINFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Get the page count of a PDF using pdfinfo (poppler-utils).
+/// Used as fallback when lopdf can't parse the PDF structure.
+fn count_pdf_pages(pdf_bytes: &[u8]) -> Result<usize, ProcessError> {
+    let temp_dir = std::env::temp_dir();
+    let pdf_path = temp_dir.join(format!("paporg_pagecount_{}.pdf", uuid::Uuid::new_v4()));
+
+    std::fs::write(&pdf_path, pdf_bytes)
+        .map_err(|e| ProcessError::PdfProcessing(format!("Failed to write temp PDF: {}", e)))?;
+
+    let result = run_pdfinfo_with_timeout(&pdf_path);
+    let _ = std::fs::remove_file(&pdf_path);
+    result
+}
+
+/// Runs pdfinfo with a timeout and parses the page count from its output.
+fn run_pdfinfo_with_timeout(pdf_path: &std::path::Path) -> Result<usize, ProcessError> {
+    let mut child = Command::new("pdfinfo")
+        .arg(pdf_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            ProcessError::PdfProcessing(format!(
+                "Failed to run pdfinfo: {}. Make sure poppler-utils is installed.",
+                e
+            ))
+        })?;
+
+    let deadline = std::time::Instant::now() + PDFINFO_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ProcessError::PdfProcessing("pdfinfo timed out".to_string()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                return Err(ProcessError::PdfProcessing(format!(
+                    "Failed to wait for pdfinfo: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    let output = child.wait_with_output().map_err(|e| {
+        ProcessError::PdfProcessing(format!("Failed to read pdfinfo output: {}", e))
+    })?;
+
+    if !output.status.success() {
+        return Err(ProcessError::PdfProcessing(format!(
+            "pdfinfo failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if let Some(count_str) = line.strip_prefix("Pages:") {
+            if let Ok(count) = count_str.trim().parse::<usize>() {
+                return Ok(count);
+            }
+        }
+    }
+
+    // Default to 1 page if we can't determine the count
+    tracing::warn!("pdfinfo output did not contain a parseable 'Pages:' line, defaulting to 1");
+    Ok(1)
 }
 
 fn render_pdf_page_to_image(
@@ -312,13 +447,18 @@ mod tests {
         let temp_file = NamedTempFile::with_suffix(".pdf").unwrap();
         std::fs::write(temp_file.path(), b"not a valid pdf content").unwrap();
 
+        // Without OCR, lopdf parse failure should error with "OCR fallback unavailable"
         let processor = PdfProcessor::new(None);
         let result = processor.process(temp_file.path());
 
         assert!(result.is_err());
         match result {
             Err(ProcessError::PdfProcessing(msg)) => {
-                assert!(msg.contains("Failed to load PDF"));
+                assert!(
+                    msg.contains("Failed to load PDF"),
+                    "Expected 'Failed to load PDF' in: {}",
+                    msg
+                );
             }
             _ => panic!("Expected PdfProcessing error"),
         }

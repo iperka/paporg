@@ -1,0 +1,6 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Enable remote write receiver so Tempo can push metrics
+# (Prometheus 2.x+ with --web.enable-remote-write-receiver flag)

@@ -7,22 +7,56 @@ mod events;
 mod state;
 mod tray;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use log::info;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tokio::sync::RwLock;
+use tracing::info;
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
 #[cfg(target_os = "macos")]
 use tauri::window::EffectsBuilder;
 
 use state::{default_config_dir, ensure_config_initialized, TauriAppState};
 
+/// Max log file size before rotation (5 MB).
+const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024;
+
+/// Set up persistent log file in the config directory.
+/// Rotates the previous log to `paporg.log.1` if it exceeds `MAX_LOG_SIZE`.
+fn open_log_file(config_dir: &std::path::Path) -> Option<std::fs::File> {
+    let logs_dir = config_dir.join("logs");
+    if std::fs::create_dir_all(&logs_dir).is_err() {
+        return None;
+    }
+
+    let log_path = logs_dir.join("paporg.log");
+
+    // Rotate if existing log is too large
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > MAX_LOG_SIZE {
+            let rotated = logs_dir.join("paporg.log.1");
+            // Remove existing rotated log (required on Windows where rename fails if dest exists)
+            let _ = std::fs::remove_file(&rotated);
+            if let Err(e) = std::fs::rename(&log_path, &rotated) {
+                eprintln!("Log rotation failed: {}", e);
+            }
+        }
+    }
+
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok()
+}
+
 /// Initialize the SeaORM database connection for the JobStore.
 async fn init_job_store_database(
     config_dir: &std::path::Path,
     job_store: &paporg::broadcast::JobStore,
 ) {
+    let _span = tracing::info_span!("init_job_store_database").entered();
     let db_url = paporg::db::default_database_path(config_dir);
     match paporg::db::init_database(&db_url).await {
         Ok(conn) => {
@@ -32,18 +66,83 @@ async fn init_job_store_database(
             info!("Job store database initialized successfully");
         }
         Err(e) => {
-            log::error!("Failed to initialize job store database: {}", e);
+            tracing::error!("Failed to initialize job store database: {}", e);
         }
     }
 }
 
 fn main() {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_secs()
-        .init();
+    // Create a Tokio runtime early — the OTel batch exporter needs one to spawn
+    // its background flush task. This runtime is also used by Tauri.
+    #[cfg(feature = "otel")]
+    let _otel_runtime = {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        // Enter the runtime context so tokio::spawn works during OTel init.
+        // SAFETY: We leak the EnterGuard so the context stays active for the
+        // lifetime of the process. The runtime itself lives until main() returns.
+        std::mem::forget(rt.enter());
+        rt
+    };
+
+    // Create log broadcaster early so we can wire it into the tracing subscriber
+    let log_broadcaster = Arc::new(paporg::LogBroadcaster::default());
+
+    // Bridge log:: macros from third-party crates (sea-orm, notify, etc.) into tracing
+    tracing_log::LogTracer::init().expect("Failed to initialize LogTracer");
+
+    // Build env filter — honours RUST_LOG, defaults to info
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // Stderr layer (with ANSI, timestamps)
+    let fmt_stderr = fmt::layer().with_target(true).with_ansi(true);
+
+    // File layer (no ANSI, append mode) — wrapped in Option so types align
+    let fmt_file = default_config_dir()
+        .and_then(|dir| open_log_file(&dir))
+        .map(|file| {
+            fmt::layer()
+                .with_target(true)
+                .with_ansi(false)
+                .with_writer(Mutex::new(file))
+        });
+
+    // Broadcast layer — forwards events to the LogBroadcaster for the frontend
+    let broadcast_layer = paporg::broadcast::BroadcastLayer::new(log_broadcaster.clone());
+
+    // Assemble the subscriber
+    let subscriber = Registry::default()
+        .with(env_filter)
+        .with(fmt_stderr)
+        .with(fmt_file)
+        .with(broadcast_layer);
+
+    // Conditionally add OTel trace + Loki layers
+    #[cfg(feature = "otel")]
+    let subscriber = {
+        use opentelemetry::trace::TracerProvider;
+
+        let provider = build_otel_provider();
+        let tracer = provider.tracer("paporg-desktop");
+        let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+        let (loki_layer, loki_task) = build_loki_layer();
+
+        // Store provider for graceful shutdown and Loki task for deferred spawning
+        OTEL_PROVIDER.lock().unwrap().replace(provider);
+        LOKI_TASK.lock().unwrap().replace(Box::pin(loki_task));
+
+        subscriber.with(otel_layer).with(loki_layer)
+    };
+
+    // Use set_global_default instead of .init() because we already called
+    // LogTracer::init() above — .init() would call it again and panic.
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("failed to set global default subscriber");
 
     info!("Starting Paporg Desktop v{}", env!("CARGO_PKG_VERSION"));
+
+    // Start continuous profiling if otel feature is enabled
+    #[cfg(feature = "otel")]
+    let _profiler = paporg::profiling::start_continuous_profiling();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -56,11 +155,22 @@ fn main() {
                 .add_migrations("sqlite:paporg.db", db::migrations())
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             let app_handle = app.handle().clone();
 
             // Initialize app state
             let mut state = TauriAppState::new();
+
+            // Inject the pre-created log broadcaster so the event bridge uses the same one
+            state.log_broadcaster = log_broadcaster;
+
+            // Spawn Loki background task if otel is enabled
+            #[cfg(feature = "otel")]
+            {
+                if let Some(task) = LOKI_TASK.lock().unwrap().take() {
+                    tauri::async_runtime::spawn(task);
+                }
+            }
 
             // Auto-initialize default config directory
             if let Some(config_dir) = default_config_dir() {
@@ -68,7 +178,7 @@ fn main() {
 
                 // Ensure the directory exists with default files
                 if let Err(e) = ensure_config_initialized(&config_dir) {
-                    log::warn!("Failed to initialize config directory: {}", e);
+                    tracing::warn!("Failed to initialize config directory: {}", e);
                 } else {
                     // Try to load the configuration
                     match state.set_config_dir(config_dir.clone()) {
@@ -81,19 +191,19 @@ fn main() {
                                     info!("Workers started automatically");
                                 }
                                 Err(e) => {
-                                    log::warn!("Failed to auto-start workers: {}", e);
+                                    tracing::warn!("Failed to auto-start workers: {}", e);
                                 }
                             }
                         }
                         Err(e) => {
-                            log::warn!("Failed to load config from {:?}: {}", config_dir, e);
+                            tracing::warn!("Failed to load config from {:?}: {}", config_dir, e);
                             // Still set the config_dir so the UI knows where to save
                             state.config_dir = Some(config_dir);
                         }
                     }
                 }
             } else {
-                log::warn!("Could not determine default config directory");
+                tracing::warn!("Could not determine default config directory");
             }
 
             // Get a reference to job_store and config_dir for database initialization
@@ -180,6 +290,9 @@ fn main() {
             commands::git_checkout,
             commands::git_create_branch,
             commands::git_merge_status,
+            commands::git_diff,
+            commands::git_log,
+            commands::git_cancel_operation,
             commands::git_initialize,
             // Email OAuth commands
             commands::start_email_authorization,
@@ -206,6 +319,78 @@ fn main() {
             commands::upload_files,
             commands::pick_and_upload_files,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                info!("Application exiting, performing graceful shutdown...");
+
+                // Flush OTel traces before exit
+                #[cfg(feature = "otel")]
+                if let Some(provider) = OTEL_PROVIDER.lock().unwrap().take() {
+                    let _ = provider.shutdown();
+                }
+
+                let state: &Arc<RwLock<TauriAppState>> =
+                    app_handle.state::<Arc<RwLock<TauriAppState>>>().inner();
+                // Use block_on since we're in the exit handler
+                let mut state_write = tauri::async_runtime::block_on(state.write());
+                state_write.shutdown();
+            }
+        });
+}
+
+// ========================================================================
+// OTel helpers (behind feature gate)
+// ========================================================================
+
+#[cfg(feature = "otel")]
+use std::future::Future;
+#[cfg(feature = "otel")]
+use std::pin::Pin;
+
+#[cfg(feature = "otel")]
+static LOKI_TASK: std::sync::Mutex<Option<Pin<Box<dyn Future<Output = ()> + Send>>>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(feature = "otel")]
+static OTEL_PROVIDER: std::sync::Mutex<Option<opentelemetry_sdk::trace::SdkTracerProvider>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(feature = "otel")]
+fn build_otel_provider() -> opentelemetry_sdk::trace::SdkTracerProvider {
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::Resource;
+
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()
+        .expect("Failed to build OTLP span exporter");
+
+    let resource = Resource::builder()
+        .with_attributes([
+            KeyValue::new("service.name", "paporg-desktop"),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        ])
+        .build();
+
+    SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(exporter)
+        .build()
+}
+
+#[cfg(feature = "otel")]
+fn build_loki_layer() -> (
+    tracing_loki::Layer,
+    impl Future<Output = ()> + Send + 'static,
+) {
+    let (layer, task) = tracing_loki::builder()
+        .label("service_name", "paporg-desktop")
+        .expect("invalid label")
+        .build_url(tracing_loki::url::Url::parse("http://localhost:3100").unwrap())
+        .expect("Failed to build Loki layer");
+
+    (layer, task)
 }

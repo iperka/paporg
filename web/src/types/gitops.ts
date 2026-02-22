@@ -240,6 +240,7 @@ export interface CommitResult {
   success: boolean
   message: string
   commitHash?: string
+  pushed?: boolean
 }
 
 export interface MergeStatus {

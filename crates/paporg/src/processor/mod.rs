@@ -49,6 +49,12 @@ impl ProcessorRegistry {
         let format = DocumentFormat::from_extension(extension)
             .ok_or_else(|| ProcessError::UnsupportedFormat(extension.to_string()))?;
 
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<unknown>");
+        let _span = tracing::info_span!("processor.dispatch", format = ?format, filename).entered();
+
         for processor in &self.processors {
             if processor.supports(format) {
                 return processor.process(path);

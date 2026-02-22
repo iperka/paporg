@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::{bounded, Receiver, Sender};
-use log::{debug, error, info};
 use tokio::sync::broadcast;
+use tracing::{debug, error, info, info_span};
 
 use crate::broadcast::job_progress::{JobPhase, JobProgressEvent};
 use crate::pipeline::progress::{BroadcastProgress, NoopProgress, ProgressReporter};
@@ -126,6 +126,7 @@ fn run_worker(
     config: Arc<PipelineConfig>,
     progress_sender: Option<Arc<broadcast::Sender<JobProgressEvent>>>,
 ) {
+    let _worker_span = info_span!("worker", worker_id).entered();
     debug!("Worker {} started", worker_id);
 
     let pipeline = Pipeline::from_config(config);
@@ -138,7 +139,19 @@ fn run_worker(
 
         match job_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(job) => {
-                debug!("Worker {} processing job: {:?}", worker_id, job.source_path);
+                let filename = job
+                    .source_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                let _job_span = info_span!(
+                    "job",
+                    job_id = %job.id,
+                    filename,
+                    source_name = job.source_name.as_deref().unwrap_or("unknown"),
+                )
+                .entered();
+                debug!("Worker {} processing job: {}", worker_id, filename);
 
                 let result = if let Some(ref sender) = progress_sender {
                     let filename = job

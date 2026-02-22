@@ -224,7 +224,7 @@ impl Default for DefaultOutputSettings {
 }
 
 /// Git synchronization settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitSettings {
     /// Whether git sync is enabled.
@@ -254,6 +254,25 @@ pub struct GitSettings {
     /// Git user email for commits.
     #[serde(default = "default_user_email")]
     pub user_email: String,
+
+    /// Timeout in seconds for git operations.
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+impl Default for GitSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            repository: String::new(),
+            branch: default_branch(),
+            sync_interval: default_sync_interval(),
+            auth: GitAuthSettings::default(),
+            user_name: default_user_name(),
+            user_email: default_user_email(),
+            timeout: default_timeout(),
+        }
+    }
 }
 
 fn default_branch() -> String {
@@ -262,6 +281,10 @@ fn default_branch() -> String {
 
 fn default_sync_interval() -> u64 {
     300 // 5 minutes
+}
+
+fn default_timeout() -> u64 {
+    120 // 2 minutes
 }
 
 fn default_user_name() -> String {

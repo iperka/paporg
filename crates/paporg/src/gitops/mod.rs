@@ -11,13 +11,18 @@ pub mod error;
 pub mod git;
 pub mod loader;
 pub mod progress;
+pub mod reconciler;
 pub mod resource;
+pub mod sync_scheduler;
 pub mod validation;
 pub mod watcher;
 
 pub use error::{GitOpsError, Result};
+pub use git::types::*;
+pub use git::GitRepository;
 pub use loader::FileTreeNode;
 pub use loader::{ConfigLoader, LoadedConfig};
+pub use reconciler::GitReconciler;
 pub use resource::{
     AnyResource, CompoundMatch, FileFilters, GitAuthSettings, GitAuthType, GitSettings,
     ImportSourceResource, ImportSourceSpec, ImportSourceType, LocalSourceConfig, MatchCondition,
@@ -25,5 +30,6 @@ pub use resource::{
     RuleResource, RuleSpec, SettingsResource, SettingsSpec, SimpleMatch, SymlinkSettings,
     VariableResource, VariableSpec, VariableTransform, API_VERSION,
 };
+pub use sync_scheduler::SyncScheduler;
 pub use validation::ConfigValidator;
 pub use watcher::{ConfigChangeEvent, ConfigWatcher};

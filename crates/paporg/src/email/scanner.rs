@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use log::{debug, error, info, warn};
 use sea_orm::DatabaseConnection;
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::gitops::resource::EmailSourceConfig;
 use crate::worker::job::EmailMetadata;
@@ -42,6 +42,7 @@ impl EmailSourceScanner {
 
     /// Scans for new email attachments and returns jobs for processing.
     pub async fn scan(&self) -> Result<Vec<Job>> {
+        let _span = info_span!("email_scan", source = %self.source_name).entered();
         info!("Scanning email source '{}'", self.source_name);
 
         // Create IMAP client

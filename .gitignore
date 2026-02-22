@@ -22,3 +22,6 @@ Thumbs.db
 web/node_modules/
 web/dist/
 web/.eslintcache
+
+# Observability data volumes (managed by Docker)
+observability/data/

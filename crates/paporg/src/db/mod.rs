@@ -12,17 +12,18 @@ pub use entities::Job;
 
 /// Initialize database connection and run migrations.
 pub async fn init_database(database_url: &str) -> Result<DatabaseConnection, DbErr> {
-    log::info!("Connecting to database: {}", redact_url(database_url));
+    let _span = tracing::info_span!("db.init").entered();
+    tracing::info!("Connecting to database: {}", redact_url(database_url));
 
     let mut opt = ConnectOptions::new(database_url);
     opt.sqlx_logging(false); // Reduce noise in logs
 
     let db = Database::connect(opt).await?;
 
-    log::info!("Running database migrations...");
+    tracing::info!("Running database migrations...");
     migrations::Migrator::up(&db, None).await?;
 
-    log::info!("Database initialized successfully");
+    tracing::info!("Database initialized successfully");
     Ok(db)
 }
 

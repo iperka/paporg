@@ -8,6 +8,9 @@ pub mod error;
 pub mod gitops;
 pub mod pipeline;
 pub mod processor;
+#[cfg(feature = "otel")]
+pub mod profiling;
+pub mod sanitize;
 pub mod secrets;
 pub mod storage;
 pub mod worker;

@@ -36,7 +36,7 @@ interface GitOpsContextValue {
   updateResource: (kind: ResourceKind, name: string, yaml: string) => Promise<boolean>
   deleteResource: (kind: ResourceKind, name: string) => Promise<boolean>
   gitPull: () => Promise<boolean>
-  gitCommit: (message: string) => Promise<boolean>
+  gitCommit: (message: string, files?: string[]) => Promise<boolean>
   checkoutBranch: (branch: string) => Promise<boolean>
   createBranch: (name: string) => Promise<boolean>
   moveFile: (source: string, destination: string) => Promise<boolean>
@@ -74,6 +74,13 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
   const [settings, setSettings] = useState<SettingsResource | null>(null)
 
   const unlistenRef = useRef<UnlistenFn | null>(null)
+
+  // Auto-clear errors after 10 seconds
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => setError(null), 10000)
+    return () => clearTimeout(timer)
+  }, [error])
 
   // Compute if git needs initialization
   const needsInitialization = Boolean(
@@ -338,12 +345,12 @@ export function GitOpsProvider({ children }: GitOpsProviderProps) {
     }
   }, [refreshTree, refreshGitStatus])
 
-  const gitCommitAction = useCallback(async (message: string): Promise<boolean> => {
+  const gitCommitAction = useCallback(async (message: string, files?: string[]): Promise<boolean> => {
     setIsLoading(true)
     setError(null)
 
     try {
-      await api.git.commit(message)
+      await api.git.commit(message, files)
       await refreshGitStatus()
       return true
     } catch (e) {

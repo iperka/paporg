@@ -301,11 +301,12 @@ pub fn parse_git_progress(line: &str) -> ParsedProgress {
     result
 }
 
-/// Tracks progress for a single git operation.
+/// Tracks progress for a single git operation, with optional cancellation support.
 pub struct OperationProgress {
     operation_id: String,
     operation_type: GitOperationType,
     broadcaster: Arc<broadcast::Sender<GitProgressEvent>>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl OperationProgress {
@@ -318,6 +319,7 @@ impl OperationProgress {
             operation_id: Uuid::new_v4().to_string(),
             operation_type,
             broadcaster,
+            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -375,6 +377,23 @@ impl OperationProgress {
     pub fn failed(&self, error: &str) {
         let event = GitProgressEvent::failed(&self.operation_id, self.operation_type, error);
         let _ = self.broadcaster.send(event);
+    }
+
+    /// Marks this operation as cancelled.
+    pub fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.failed("Operation cancelled");
+    }
+
+    /// Returns true if the operation has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Returns a clone of the cancellation flag for sharing with async tasks.
+    pub fn cancellation_token(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.cancelled)
     }
 }
 

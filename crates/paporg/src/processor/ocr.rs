@@ -44,6 +44,8 @@ impl OcrProcessor {
     }
 
     pub fn process_image_bytes(&self, image_data: &[u8]) -> Result<String, ProcessError> {
+        let _span = tracing::info_span!("processor.ocr").entered();
+
         // Load image
         let img = image::load_from_memory(image_data)
             .map_err(|e| ProcessError::OcrFailed(format!("Failed to load image: {}", e)))?;
