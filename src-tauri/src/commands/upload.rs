@@ -25,14 +25,6 @@ pub struct UploadResult {
     pub errors: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadedFile {
-    pub original_name: String,
-    pub destination_path: String,
-    pub size: u64,
-}
-
 // ============================================================================
 // Commands
 // ============================================================================
