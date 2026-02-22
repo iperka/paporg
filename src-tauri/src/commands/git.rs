@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use paporg::gitops::git::{
-    BranchInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus, PullResult,
+    BranchInfo, CommitInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus,
+    PullResult,
 };
 use paporg::gitops::progress::GitOperationType;
 use tauri::State;
@@ -252,6 +253,64 @@ pub async fn git_merge_status(
 
     match repo.merge_status(&branch) {
         Ok(status) => Ok(ApiResponse::ok(status)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Get git log (recent commits).
+#[tauri::command]
+pub async fn git_log(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    limit: Option<u32>,
+) -> Result<ApiResponse<Vec<CommitInfo>>, String> {
+    let state = state.read().await;
+
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
+    };
+
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(Vec::new()));
+    }
+
+    match repo.log(limit.unwrap_or(20)) {
+        Ok(commits) => Ok(ApiResponse::ok(commits)),
+        Err(e) => Ok(ApiResponse::err(e.to_string())),
+    }
+}
+
+/// Cancel an active git operation.
+#[tauri::command]
+pub async fn git_cancel_operation(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    operation_id: String,
+) -> Result<ApiResponse<bool>, String> {
+    let state = state.read().await;
+    let cancelled = state.git_broadcaster.cancel_operation(&operation_id);
+    Ok(ApiResponse::ok(cancelled))
+}
+
+/// Get diff for a file or all files.
+#[tauri::command]
+pub async fn git_diff(
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+    file: Option<String>,
+    cached: Option<bool>,
+) -> Result<ApiResponse<String>, String> {
+    let state = state.read().await;
+
+    let repo = match make_repo(&state) {
+        Ok(r) => r,
+        Err(e) => return Ok(ApiResponse::err(e.error.unwrap_or_default())),
+    };
+
+    if !repo.is_git_repo() {
+        return Ok(ApiResponse::ok(String::new()));
+    }
+
+    match repo.diff(file.as_deref(), cached.unwrap_or(false)) {
+        Ok(diff) => Ok(ApiResponse::ok(diff)),
         Err(e) => Ok(ApiResponse::err(e.to_string())),
     }
 }

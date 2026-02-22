@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { GitBranch, RefreshCw, Check, AlertCircle, Loader2, CloudOff, ExternalLink, FolderDown, Plus, ArrowRight, CheckCircle2, FileEdit, FilePlus, FileX, GitCommitHorizontal, ChevronRight, ChevronDown, Folder, FolderOpen, Settings, FileText, Variable, FolderInput } from 'lucide-react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
+import { GitBranch, RefreshCw, Check, AlertCircle, Loader2, CloudOff, ExternalLink, FolderDown, Plus, ArrowRight, CheckCircle2, FileEdit, FilePlus, FileX, GitCommitHorizontal, ChevronRight, ChevronDown, Folder, FolderOpen, Settings, FileText, Variable, FolderInput, History } from 'lucide-react'
 import { useGitOps } from '@/contexts/GitOpsContext'
 import { useGitProgressContext } from '@/contexts/GitProgressContext'
 import { useToast } from '@/components/ui/use-toast'
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SecretField } from '@/components/form'
 import { BranchSelector } from '@/components/gitops/BranchSelector'
 import { CommitDialog } from '@/components/gitops/CommitDialog'
-import { api } from '@/api'
+import { api, type CommitInfo } from '@/api'
 import {
   type SettingsSpec,
   type SettingsResource,
@@ -366,9 +366,73 @@ function ChangesTree({ files, fileTree }: { files: GitFileStatus[]; fileTree: Fi
   )
 }
 
+function CommitHistoryCard() {
+  const [commits, setCommits] = useState<CommitInfo[]>([])
+  const [isLoadingCommits, setIsLoadingCommits] = useState(false)
+
+  const loadCommits = useCallback(async () => {
+    setIsLoadingCommits(true)
+    try {
+      const result = await api.git.log(10)
+      setCommits(result)
+    } catch {
+      // Silently fail — history is non-critical
+    } finally {
+      setIsLoadingCommits(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCommits()
+  }, [loadCommits])
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Commit History</CardTitle>
+            <CardDescription>Recent commits in this repository</CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={loadCommits} disabled={isLoadingCommits}>
+            <RefreshCw className={`h-4 w-4 ${isLoadingCommits ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoadingCommits && commits.length === 0 ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : commits.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No commits yet</p>
+        ) : (
+          <div className="space-y-1 max-h-64 overflow-y-auto -mx-2">
+            {commits.map((commit) => (
+              <div key={commit.hash} className="flex items-start gap-3 px-2 py-2 rounded hover:bg-muted/50">
+                <History className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm truncate">{commit.message}</p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <code className="text-xs">{commit.hash.slice(0, 7)}</code>
+                    <span>&middot;</span>
+                    <span>{commit.author}</span>
+                    <span>&middot;</span>
+                    <span>{new Date(commit.date).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function GitSyncPage() {
   const { fileTree, selectFile, selectedResource, updateResource, isLoading, gitStatus, gitPull, refreshGitStatus, error: gitOpsError, needsInitialization, initializeGit } = useGitOps()
-  const { hasActiveOperations } = useGitProgressContext()
+  const { hasActiveOperations, activeOperations } = useGitProgressContext()
   const { toast } = useToast()
 
   const [formData, setFormData] = useState<SettingsSpec>(createDefaultSettingsSpec())
@@ -844,6 +908,32 @@ export function GitSyncPage() {
           </div>
         )}
 
+        {/* Active operation progress */}
+        {hasActiveOperations && (() => {
+          const ops = Array.from(activeOperations.values())
+          const activeOp = ops.find(op => op.phase !== 'completed' && op.phase !== 'failed') || ops[0]
+          if (!activeOp) return null
+          return (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-blue-500/10 border border-blue-500/20 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium capitalize">{activeOp.operationType}</p>
+                <p className="text-xs text-muted-foreground truncate">{activeOp.message}</p>
+              </div>
+              {activeOp.progress !== undefined && (
+                <div className="w-24">
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-300"
+                      style={{ width: `${activeOp.progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
         {/* Status */}
         <Card>
           <CardContent className="pt-6">
@@ -916,6 +1006,9 @@ export function GitSyncPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Commit History */}
+        <CommitHistoryCard />
 
         {/* Commit Dialog */}
         <CommitDialog

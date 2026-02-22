@@ -4,7 +4,7 @@
 //! the reconciler and supports manual trigger via broadcast channel.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -20,6 +20,10 @@ pub struct SyncScheduler {
     interval: Duration,
     shutdown: Arc<AtomicBool>,
     git_broadcaster: Arc<GitProgressBroadcaster>,
+    /// Stored thread handle so we can join on stop.
+    handle: Mutex<Option<JoinHandle<()>>>,
+    /// Trigger sender used to wake the select loop on stop.
+    trigger_tx: broadcast::Sender<()>,
 }
 
 impl SyncScheduler {
@@ -28,24 +32,27 @@ impl SyncScheduler {
         reconciler: Arc<GitReconciler>,
         interval: Duration,
         git_broadcaster: Arc<GitProgressBroadcaster>,
+        trigger_tx: broadcast::Sender<()>,
     ) -> Self {
         Self {
             reconciler,
             interval,
             shutdown: Arc::new(AtomicBool::new(false)),
             git_broadcaster,
+            handle: Mutex::new(None),
+            trigger_tx,
         }
     }
 
     /// Start the sync loop in a background thread.
     /// Accepts a trigger receiver for manual sync requests.
-    pub fn start(&self, mut trigger_rx: broadcast::Receiver<()>) -> JoinHandle<()> {
+    pub fn start(&self, mut trigger_rx: broadcast::Receiver<()>) {
         let reconciler = Arc::clone(&self.reconciler);
         let shutdown = Arc::clone(&self.shutdown);
         let interval = self.interval;
         let broadcaster = Arc::clone(&self.git_broadcaster);
 
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -84,12 +91,37 @@ impl SyncScheduler {
                     }
                 }
             });
-        })
+        });
+
+        let mut guard = self.handle.lock().unwrap();
+        *guard = Some(handle);
     }
 
-    /// Signals the scheduler to stop.
+    /// Signals the scheduler to stop and waits for the thread to finish.
     pub fn stop(&self) {
         self.shutdown.store(true, Ordering::Release);
+        // Send a wakeup signal so the select loop sees the shutdown flag
+        let _ = self.trigger_tx.send(());
+
+        let handle = {
+            let mut guard = self.handle.lock().unwrap();
+            guard.take()
+        };
+        if let Some(handle) = handle {
+            // Join with a timeout by spinning briefly
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if handle.is_finished() {
+                    let _ = handle.join();
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    log::warn!("Scheduler thread did not stop within timeout");
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
     }
 }
 
@@ -109,19 +141,18 @@ mod tests {
         let reconciler = Arc::new(GitReconciler::new(repo, change_tx));
         let broadcaster = Arc::new(GitProgressBroadcaster::default());
 
-        let scheduler = SyncScheduler::new(reconciler, Duration::from_millis(50), broadcaster);
-
         let (trigger_tx, trigger_rx) = broadcast::channel(16);
-        let handle = scheduler.start(trigger_rx);
+        let scheduler = SyncScheduler::new(
+            reconciler,
+            Duration::from_millis(50),
+            broadcaster,
+            trigger_tx,
+        );
 
-        // Let it run briefly then stop
+        scheduler.start(trigger_rx);
+
+        // Let it run briefly then stop (stop() now sends wakeup + joins)
         std::thread::sleep(Duration::from_millis(100));
         scheduler.stop();
-
-        // Send a trigger to wake up the select loop so it sees the shutdown
-        let _ = trigger_tx.send(());
-
-        // Should join within a reasonable time
-        handle.join().expect("scheduler thread panicked");
     }
 }

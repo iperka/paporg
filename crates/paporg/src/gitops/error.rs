@@ -66,6 +66,15 @@ pub enum GitOpsError {
     #[error("Git operation failed: {0}")]
     GitOperation(String),
 
+    #[error("Git network error: {0}")]
+    GitNetworkError(String),
+
+    #[error("Git operation timed out after {0}s")]
+    GitTimeout(u64),
+
+    #[error("Git merge conflict: {0}")]
+    GitMergeConflict(String),
+
     #[error("Git repository not initialized")]
     GitNotInitialized,
 
@@ -101,6 +110,46 @@ impl From<std::io::Error> for GitOpsError {
     fn from(err: std::io::Error) -> Self {
         GitOpsError::FileOperation(err.to_string())
     }
+}
+
+impl GitOpsError {
+    /// Returns true if the error is likely transient and the operation can be retried.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            GitOpsError::GitNetworkError(_) | GitOpsError::GitTimeout(_)
+        )
+    }
+}
+
+/// Classifies a git stderr string into a more specific error variant.
+pub fn classify_git_error(stderr: &str) -> GitOpsError {
+    let lower = stderr.to_lowercase();
+
+    if lower.contains("could not resolve host")
+        || lower.contains("connection refused")
+        || lower.contains("connection timed out")
+        || lower.contains("network is unreachable")
+        || lower.contains("unable to access")
+        || lower.contains("failed to connect")
+        || lower.contains("couldn't connect to server")
+        || lower.contains("the remote end hung up unexpectedly")
+    {
+        return GitOpsError::GitNetworkError(stderr.trim().to_string());
+    }
+
+    if lower.contains("merge conflict") || lower.contains("conflict") && lower.contains("merge") {
+        return GitOpsError::GitMergeConflict(stderr.trim().to_string());
+    }
+
+    if lower.contains("authentication failed")
+        || lower.contains("permission denied")
+        || lower.contains("invalid credentials")
+    {
+        return GitOpsError::GitAuthFailed(stderr.trim().to_string());
+    }
+
+    GitOpsError::GitOperation(stderr.trim().to_string())
 }
 
 /// Result type for GitOps operations.

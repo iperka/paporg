@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
@@ -500,13 +501,12 @@ impl GitRepository {
         let ((), stdout_lines) = tokio::join!(stderr_task, stdout_task);
         let stdout_text = stdout_lines.join("\n");
 
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| GitOpsError::GitOperation(e.to_string()))?;
+        let status = self.wait_with_timeout(&mut child).await;
 
         // Drop auth env (cleanup guard) after command completes
         drop(auth);
+
+        let status = status?;
 
         if status.success() {
             let already_up_to_date = stdout_text.contains("Already up to date");
@@ -551,28 +551,51 @@ impl GitRepository {
 
         if let Some(files) = files {
             for file in files {
-                self.run_git(&["add", file])?;
+                let output = self.run_git_async(&["add", file]).await?;
+                if !output.status.success() {
+                    let error = format_git_error(&output);
+                    progress.failed(&error);
+                    return Err(GitOpsError::GitOperation(error));
+                }
             }
         } else {
-            self.run_git(&["add", "."])?;
+            let output = self.run_git_async(&["add", "."]).await?;
+            if !output.status.success() {
+                let error = format_git_error(&output);
+                progress.failed(&error);
+                return Err(GitOpsError::GitOperation(error));
+            }
         }
 
-        let status = self.status()?;
+        let status = {
+            let repo_path = self.repo_path.clone();
+            let settings = self.settings.clone();
+            tokio::task::spawn_blocking(move || {
+                let repo = GitRepository::new(repo_path, settings);
+                repo.status()
+            })
+            .await
+            .map_err(|e| GitOpsError::GitOperation(format!("spawn_blocking failed: {}", e)))?
+        }?;
+
         if status.is_clean {
             progress.completed("Nothing to commit");
             return Ok(CommitResult {
                 success: true,
                 message: "Nothing to commit".to_string(),
                 commit_hash: None,
+                pushed: false,
             });
         }
 
         progress.phase(GitOperationPhase::Committing, "Creating commit...");
 
-        let output = self.run_git(&["commit", "-m", message])?;
+        let output = self.run_git_async(&["commit", "-m", message]).await?;
 
         if output.status.success() {
-            let hash_output = self.run_git(&["rev-parse", "--short", "HEAD"])?;
+            let hash_output = self
+                .run_git_async(&["rev-parse", "--short", "HEAD"])
+                .await?;
             let commit_hash = String::from_utf8_lossy(&hash_output.stdout)
                 .trim()
                 .to_string();
@@ -583,6 +606,7 @@ impl GitRepository {
                 success: true,
                 message: String::from_utf8_lossy(&output.stdout).trim().to_string(),
                 commit_hash: Some(commit_hash),
+                pushed: false,
             })
         } else {
             let error = format_git_error(&output);
@@ -640,12 +664,11 @@ impl GitRepository {
 
         tokio::join!(stderr_task, stdout_task);
 
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| GitOpsError::GitOperation(e.to_string()))?;
+        let status = self.wait_with_timeout(&mut child).await;
 
         drop(auth);
+
+        let status = status?;
 
         if status.success() {
             progress.completed("Push completed");
@@ -664,10 +687,11 @@ impl GitRepository {
         files: Option<&[&str]>,
         progress: &OperationProgress,
     ) -> Result<CommitResult> {
-        let commit_result = self.commit_with_progress(message, files, progress).await?;
+        let mut commit_result = self.commit_with_progress(message, files, progress).await?;
 
         if commit_result.commit_hash.is_some() {
             self.push_with_progress(progress).await?;
+            commit_result.pushed = true;
         }
 
         Ok(commit_result)
@@ -726,12 +750,11 @@ impl GitRepository {
 
         tokio::join!(stderr_task, stdout_task);
 
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| GitOpsError::GitOperation(e.to_string()))?;
+        let status = self.wait_with_timeout(&mut child).await;
 
         drop(auth);
+
+        let status = status?;
 
         if status.success() {
             progress.completed("Fetch completed");
@@ -775,11 +798,69 @@ impl GitRepository {
         }
     }
 
+    /// Returns the git log as a list of commits.
+    pub fn log(&self, limit: u32) -> Result<Vec<CommitInfo>> {
+        if !self.is_git_repo() {
+            return Err(GitOpsError::GitNotInitialized);
+        }
+
+        if !self.has_commits() {
+            return Ok(Vec::new());
+        }
+
+        let limit_str = format!("-{}", limit);
+        let output = self.run_git(&["log", &limit_str, "--format=%h%x00%an%x00%aI%x00%s"])?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let commits = text
+            .lines()
+            .filter(|line| !line.is_empty())
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(4, '\0').collect();
+                if parts.len() == 4 {
+                    Some(CommitInfo {
+                        hash: parts[0].to_string(),
+                        author: parts[1].to_string(),
+                        date: parts[2].to_string(),
+                        message: parts[3].to_string(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(commits)
+    }
+
+    /// Returns a unified diff string for the given file (or all files if None).
+    pub fn diff(&self, file: Option<&str>, cached: bool) -> Result<String> {
+        if !self.is_git_repo() {
+            return Err(GitOpsError::GitNotInitialized);
+        }
+
+        let mut args = vec!["diff"];
+        if cached {
+            args.push("--cached");
+        }
+        if let Some(f) = file {
+            args.push("--");
+            args.push(f);
+        }
+
+        let output = self.run_git(&args)?;
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
     // ========================================================================
     // Private helpers
     // ========================================================================
 
-    /// Runs a git command in the repository directory.
+    /// Runs a git command in the repository directory (synchronous).
     fn run_git(&self, args: &[&str]) -> Result<Output> {
         let output = Command::new("git")
             .current_dir(&self.repo_path)
@@ -788,6 +869,50 @@ impl GitRepository {
             .map_err(|e| GitOpsError::GitOperation(e.to_string()))?;
 
         Ok(output)
+    }
+
+    /// Runs a git command asynchronously using spawn_blocking, with a timeout.
+    async fn run_git_async(&self, args: &[&str]) -> Result<Output> {
+        let repo_path = self.repo_path.clone();
+        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let timeout_secs = self.settings.timeout;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            tokio::task::spawn_blocking(move || {
+                Command::new("git")
+                    .current_dir(&repo_path)
+                    .args(&args_owned)
+                    .output()
+                    .map_err(|e| GitOpsError::GitOperation(e.to_string()))
+            }),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => Err(GitOpsError::GitOperation(format!(
+                "spawn_blocking failed: {}",
+                e
+            ))),
+            Err(_) => Err(GitOpsError::GitTimeout(timeout_secs)),
+        }
+    }
+
+    /// Wraps an async child process wait with the configured timeout.
+    async fn wait_with_timeout(
+        &self,
+        child: &mut tokio::process::Child,
+    ) -> Result<std::process::ExitStatus> {
+        let timeout_secs = self.settings.timeout;
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
+            Ok(Ok(status)) => Ok(status),
+            Ok(Err(e)) => Err(GitOpsError::GitOperation(e.to_string())),
+            Err(_) => {
+                let _ = child.kill().await;
+                Err(GitOpsError::GitTimeout(timeout_secs))
+            }
+        }
     }
 
     /// Gets authentication environment for git commands.
@@ -925,10 +1050,12 @@ mod tests {
             success: true,
             message: "Test commit".to_string(),
             commit_hash: Some("abc123".to_string()),
+            pushed: true,
         };
 
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"commitHash\":\"abc123\""));
+        assert!(json.contains("\"pushed\":true"));
     }
 }

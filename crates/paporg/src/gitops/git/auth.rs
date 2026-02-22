@@ -199,13 +199,21 @@ echo '{}'"#,
                 )));
             }
 
+            // Shell-escape the key path to handle spaces and special characters
+            let safe_path = {
+                let display = key_path.display().to_string();
+                let escaped = display.replace('\'', "'\\''");
+                if escaped.starts_with('-') {
+                    format!("'./{}'", escaped)
+                } else {
+                    format!("'{}'", escaped)
+                }
+            };
+
             // Use StrictHostKeyChecking=accept-new to accept new hosts but reject changed keys
             env.push((
                 "GIT_SSH_COMMAND".to_string(),
-                format!(
-                    "ssh -i {} -o StrictHostKeyChecking=accept-new",
-                    key_path.display()
-                ),
+                format!("ssh -i {} -o StrictHostKeyChecking=accept-new", safe_path),
             ));
         }
     }

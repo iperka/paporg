@@ -64,6 +64,9 @@ pub struct TauriAppState {
 
     /// Background sync scheduler.
     pub sync_scheduler: Option<SyncScheduler>,
+
+    /// Config change listener task handle (to prevent duplicates).
+    config_listener_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl TauriAppState {
@@ -90,6 +93,7 @@ impl TauriAppState {
             sync_trigger_tx,
             reconciler: None,
             sync_scheduler: None,
+            config_listener_handle: None,
         }
     }
 
@@ -333,28 +337,35 @@ impl TauriAppState {
                 reconciler,
                 Duration::from_secs(git_settings.sync_interval),
                 self.git_broadcaster.clone(),
+                self.sync_trigger_tx.clone(),
             );
             scheduler.start(self.sync_trigger_tx.subscribe());
             self.sync_scheduler = Some(scheduler);
         }
 
+        // Abort old config change listener before starting a new one
+        if let Some(handle) = self.config_listener_handle.take() {
+            handle.abort();
+        }
+
         // Wire up the config change listener
-        Self::start_config_change_listener(
+        self.config_listener_handle = Some(Self::start_config_change_listener(
             app.clone(),
             state_arc,
             self.config_change_sender.subscribe(),
-        );
+        ));
 
         Ok(())
     }
 
     /// Starts a config change listener that auto-reloads when git changes are detected.
     /// Subscribes to reconciler events and reloads config + notifies UI.
+    /// Returns the JoinHandle so the caller can abort it to prevent duplicates.
     pub fn start_config_change_listener(
         app: tauri::AppHandle,
         state: Arc<RwLock<TauriAppState>>,
         mut change_rx: broadcast::Receiver<ConfigChangeEvent>,
-    ) {
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
                 match change_rx.recv().await {
@@ -376,7 +387,27 @@ impl TauriAppState {
                     }
                 }
             }
-        });
+        })
+    }
+
+    /// Gracefully shuts down all background tasks and threads.
+    pub fn shutdown(&mut self) {
+        info!("Shutting down app state...");
+
+        // Stop sync scheduler (sets flag, wakes thread, joins)
+        if let Some(scheduler) = self.sync_scheduler.take() {
+            scheduler.stop();
+        }
+
+        // Abort config change listener
+        if let Some(handle) = self.config_listener_handle.take() {
+            handle.abort();
+        }
+
+        // Stop workers and scanner
+        self.stop_workers();
+
+        info!("App state shutdown complete");
     }
 }
 

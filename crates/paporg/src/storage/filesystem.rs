@@ -4,6 +4,29 @@ use chrono::{Datelike, Utc};
 
 use crate::error::StorageError;
 
+/// Move a file from `src` to `dst`. Uses `rename` first (fast, atomic on same
+/// filesystem). Falls back to copy + delete when rename fails — this handles
+/// cross-device moves and certain macOS permission scenarios.
+fn move_file(src: &Path, dst: &Path) -> Result<(), StorageError> {
+    // Fast path: atomic rename
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+
+    // Slow path: copy then remove original
+    std::fs::copy(src, dst).map_err(|e| StorageError::MoveFile {
+        from: src.to_path_buf(),
+        to: dst.to_path_buf(),
+        source: e,
+    })?;
+    std::fs::remove_file(src).map_err(|e| StorageError::MoveFile {
+        from: src.to_path_buf(),
+        to: dst.to_path_buf(),
+        source: e,
+    })?;
+    Ok(())
+}
+
 pub struct FileStorage {
     output_directory: PathBuf,
 }
@@ -121,11 +144,7 @@ impl FileStorage {
         let archive_filename = format!("{}_{}", date_prefix, original_name);
         let archive_path = self.resolve_conflict(&archive_dir, &archive_filename)?;
 
-        std::fs::rename(source_path, &archive_path).map_err(|e| StorageError::MoveFile {
-            from: source_path.to_path_buf(),
-            to: archive_path.clone(),
-            source: e,
-        })?;
+        move_file(source_path, &archive_path)?;
 
         Ok(archive_path)
     }

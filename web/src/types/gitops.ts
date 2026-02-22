@@ -240,6 +240,14 @@ export interface CommitResult {
   success: boolean
   message: string
   commitHash?: string
+  pushed?: boolean
+}
+
+export interface CommitInfo {
+  hash: string
+  author: string
+  date: string
+  message: string
 }
 
 export interface MergeStatus {

@@ -70,6 +70,9 @@ pub struct CommitResult {
     pub message: String,
     /// Commit hash if successful.
     pub commit_hash: Option<String>,
+    /// Whether the commit was also pushed to remote.
+    #[serde(default)]
+    pub pushed: bool,
 }
 
 /// Status of a potential merge operation.
@@ -100,6 +103,20 @@ pub struct MergeResult {
     pub merged_files: u32,
     /// List of files that have conflicts (if any).
     pub conflicting_files: Vec<String>,
+}
+
+/// Information about a single commit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    /// Short commit hash.
+    pub hash: String,
+    /// Commit author name.
+    pub author: String,
+    /// Commit date (ISO 8601).
+    pub date: String,
+    /// Commit message (first line).
+    pub message: String,
 }
 
 /// Result of the git initialize operation.

@@ -153,6 +153,13 @@ export interface BranchInfo {
   isRemote: boolean;
 }
 
+export interface CommitInfo {
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
 export interface MergeStatus {
   ahead: number;
   behind: number;
@@ -420,6 +427,21 @@ export const api = {
 
     getMergeStatus: async (): Promise<MergeStatus> => {
       const response = await invoke<ApiResponse<MergeStatus>>('git_merge_status');
+      return unwrap(response);
+    },
+
+    diff: async (file?: string, cached?: boolean): Promise<string> => {
+      const response = await invoke<ApiResponse<string>>('git_diff', { file, cached });
+      return unwrap(response);
+    },
+
+    log: async (limit?: number): Promise<CommitInfo[]> => {
+      const response = await invoke<ApiResponse<CommitInfo[]>>('git_log', { limit });
+      return unwrap(response);
+    },
+
+    cancelOperation: async (operationId: string): Promise<boolean> => {
+      const response = await invoke<ApiResponse<boolean>>('git_cancel_operation', { operationId });
       return unwrap(response);
     },
 

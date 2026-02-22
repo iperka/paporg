@@ -7,16 +7,70 @@ mod events;
 mod state;
 mod tray;
 
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 use log::info;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tokio::sync::RwLock;
 
 #[cfg(target_os = "macos")]
 use tauri::window::EffectsBuilder;
 
 use state::{default_config_dir, ensure_config_initialized, TauriAppState};
+
+/// Max log file size before rotation (5 MB).
+const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024;
+
+/// Writer that duplicates output to stderr and a log file.
+struct TeeWriter {
+    file: Mutex<std::fs::File>,
+}
+
+impl Write for TeeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // Always write to stderr
+        let _ = std::io::stderr().write_all(buf);
+        // Write to log file
+        if let Ok(mut f) = self.file.lock() {
+            let _ = f.write_all(buf);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stderr().flush();
+        if let Ok(mut f) = self.file.lock() {
+            let _ = f.flush();
+        }
+        Ok(())
+    }
+}
+
+/// Set up persistent log file in the config directory.
+/// Rotates the previous log to `paporg.log.1` if it exceeds `MAX_LOG_SIZE`.
+fn open_log_file(config_dir: &std::path::Path) -> Option<std::fs::File> {
+    let logs_dir = config_dir.join("logs");
+    if std::fs::create_dir_all(&logs_dir).is_err() {
+        return None;
+    }
+
+    let log_path = logs_dir.join("paporg.log");
+
+    // Rotate if existing log is too large
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > MAX_LOG_SIZE {
+            let rotated = logs_dir.join("paporg.log.1");
+            let _ = std::fs::rename(&log_path, rotated);
+        }
+    }
+
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok()
+}
 
 /// Initialize the SeaORM database connection for the JobStore.
 async fn init_job_store_database(
@@ -38,10 +92,25 @@ async fn init_job_store_database(
 }
 
 fn main() {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_secs()
-        .init();
+    // Initialize logging — write to both stderr and a persistent log file
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    builder.format_timestamp_secs();
+
+    if let Some(config_dir) = default_config_dir() {
+        if let Some(file) = open_log_file(&config_dir) {
+            let tee = TeeWriter {
+                file: Mutex::new(file),
+            };
+            builder
+                .target(env_logger::Target::Pipe(Box::new(tee)))
+                .init();
+        } else {
+            builder.init();
+        }
+    } else {
+        builder.init();
+    };
 
     info!("Starting Paporg Desktop v{}", env!("CARGO_PKG_VERSION"));
 
@@ -180,6 +249,9 @@ fn main() {
             commands::git_checkout,
             commands::git_create_branch,
             commands::git_merge_status,
+            commands::git_diff,
+            commands::git_log,
+            commands::git_cancel_operation,
             commands::git_initialize,
             // Email OAuth commands
             commands::start_email_authorization,
@@ -206,6 +278,16 @@ fn main() {
             commands::upload_files,
             commands::pick_and_upload_files,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                info!("Application exiting, performing graceful shutdown...");
+                let state: &Arc<RwLock<TauriAppState>> =
+                    app_handle.state::<Arc<RwLock<TauriAppState>>>().inner();
+                // Use block_on since we're in the exit handler
+                let mut state_write = tauri::async_runtime::block_on(state.write());
+                state_write.shutdown();
+            }
+        });
 }
