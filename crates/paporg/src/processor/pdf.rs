@@ -113,15 +113,29 @@ impl PdfProcessor {
         ocr: &OcrProcessor,
     ) -> Result<String, ProcessError> {
         let mut all_text = String::new();
+        let mut successes = 0;
 
         for page_num in 1..=page_count {
-            if let Ok(image_data) = render_pdf_page_to_image(pdf_bytes, page_num as u32, ocr.dpi())
-            {
-                if let Ok(page_text) = ocr.process_image_bytes(&image_data) {
-                    all_text.push_str(&page_text);
-                    all_text.push('\n');
+            match render_pdf_page_to_image(pdf_bytes, page_num as u32, ocr.dpi()) {
+                Ok(image_data) => match ocr.process_image_bytes(&image_data) {
+                    Ok(page_text) => {
+                        all_text.push_str(&page_text);
+                        all_text.push('\n');
+                        successes += 1;
+                    }
+                    Err(e) => tracing::warn!(page = page_num, "OCR failed for page: {}", e),
+                },
+                Err(e) => {
+                    tracing::warn!(page = page_num, "Failed to render page to image: {}", e)
                 }
             }
+        }
+
+        if successes == 0 && page_count > 0 {
+            return Err(ProcessError::PdfProcessing(format!(
+                "OCR failed on all {} pages",
+                page_count
+            )));
         }
 
         Ok(all_text)
@@ -190,6 +204,9 @@ fn should_use_ocr(text: &str) -> bool {
     false
 }
 
+/// Timeout for pdfinfo command (30 seconds).
+const PDFINFO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Get the page count of a PDF using pdfinfo (poppler-utils).
 /// Used as fallback when lopdf can't parse the PDF structure.
 fn count_pdf_pages(pdf_bytes: &[u8]) -> Result<usize, ProcessError> {
@@ -199,18 +216,49 @@ fn count_pdf_pages(pdf_bytes: &[u8]) -> Result<usize, ProcessError> {
     std::fs::write(&pdf_path, pdf_bytes)
         .map_err(|e| ProcessError::PdfProcessing(format!("Failed to write temp PDF: {}", e)))?;
 
-    let output = Command::new("pdfinfo")
-        .arg(&pdf_path)
-        .output()
+    let result = run_pdfinfo_with_timeout(&pdf_path);
+    let _ = std::fs::remove_file(&pdf_path);
+    result
+}
+
+/// Runs pdfinfo with a timeout and parses the page count from its output.
+fn run_pdfinfo_with_timeout(pdf_path: &std::path::Path) -> Result<usize, ProcessError> {
+    let mut child = Command::new("pdfinfo")
+        .arg(pdf_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| {
-            let _ = std::fs::remove_file(&pdf_path);
             ProcessError::PdfProcessing(format!(
                 "Failed to run pdfinfo: {}. Make sure poppler-utils is installed.",
                 e
             ))
         })?;
 
-    let _ = std::fs::remove_file(&pdf_path);
+    let deadline = std::time::Instant::now() + PDFINFO_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ProcessError::PdfProcessing("pdfinfo timed out".to_string()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                return Err(ProcessError::PdfProcessing(format!(
+                    "Failed to wait for pdfinfo: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    let output = child.wait_with_output().map_err(|e| {
+        ProcessError::PdfProcessing(format!("Failed to read pdfinfo output: {}", e))
+    })?;
 
     if !output.status.success() {
         return Err(ProcessError::PdfProcessing(format!(
@@ -229,6 +277,7 @@ fn count_pdf_pages(pdf_bytes: &[u8]) -> Result<usize, ProcessError> {
     }
 
     // Default to 1 page if we can't determine the count
+    tracing::warn!("pdfinfo output did not contain a parseable 'Pages:' line, defaulting to 1");
     Ok(1)
 }
 

@@ -99,10 +99,13 @@ pub async fn git_pull(
     drop(state_guard);
 
     let progress = broadcaster.start_operation(GitOperationType::Pull);
-    match reconciler.reconcile(&progress).await {
+    let op_id = progress.operation_id().to_string();
+    let result = match reconciler.reconcile(&progress).await {
         Ok(result) => Ok(ApiResponse::ok(result.pull_result)),
         Err(e) => Ok(ApiResponse::err(e.to_string())),
-    }
+    };
+    broadcaster.complete_operation(&op_id);
+    result
 }
 
 /// Git commit and push.
@@ -134,12 +137,13 @@ pub async fn git_commit(
 
     let repo = GitRepository::new(&config_dir, git_settings);
     let progress = git_broadcaster.start_operation(GitOperationType::Commit);
+    let op_id = progress.operation_id().to_string();
 
     let files_ref: Option<Vec<&str>> = files
         .as_ref()
         .map(|f| f.iter().map(|s| s.as_str()).collect());
 
-    match repo
+    let result = match repo
         .commit_and_push_with_progress(&message, files_ref.as_deref(), &progress)
         .await
     {
@@ -150,7 +154,9 @@ pub async fn git_commit(
             Ok(ApiResponse::ok(result))
         }
         Err(e) => Ok(ApiResponse::err(e.to_string())),
-    }
+    };
+    git_broadcaster.complete_operation(&op_id);
+    result
 }
 
 /// List branches.

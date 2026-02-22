@@ -243,13 +243,6 @@ export interface CommitResult {
   pushed?: boolean
 }
 
-export interface CommitInfo {
-  hash: string
-  author: string
-  date: string
-  message: string
-}
-
 export interface MergeStatus {
   canFastForward: boolean
   ahead: number

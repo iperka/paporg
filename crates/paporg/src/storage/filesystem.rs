@@ -14,6 +14,13 @@ fn move_file(src: &Path, dst: &Path) -> Result<(), StorageError> {
     }
 
     // Slow path: copy then remove original
+    if dst.exists() {
+        return Err(StorageError::MoveFile {
+            from: src.to_path_buf(),
+            to: dst.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::AlreadyExists, "destination exists"),
+        });
+    }
     std::fs::copy(src, dst).map_err(|e| StorageError::MoveFile {
         from: src.to_path_buf(),
         to: dst.to_path_buf(),

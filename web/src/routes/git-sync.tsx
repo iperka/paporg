@@ -256,7 +256,6 @@ function TreeNodeItem({ node, level = 0 }: { node: TreeNode; level?: number }) {
 function buildFullTree(
   fileTree: FileTreeNode | null,
   gitFiles: GitFileStatus[],
-  _basePath: string = ''
 ): TreeNode[] {
   if (!fileTree) return buildFileTree(gitFiles)
 
@@ -265,10 +264,6 @@ function buildFullTree(
   for (const file of gitFiles) {
     const cleanPath = file.path.replace(/\/+$/, '')
     statusMap.set(cleanPath, file)
-    // Also check if this is a directory marker - mark all children
-    if (file.path.endsWith('/')) {
-      // This is an untracked directory, we'll handle it when we traverse
-    }
   }
 
   // Check if a path or any parent is marked as untracked directory

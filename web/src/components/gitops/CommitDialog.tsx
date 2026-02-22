@@ -62,7 +62,8 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       // Select all files by default
       setSelectedFiles(new Set(allFiles.map((f) => f.path)))
     }
-  }, [open, allFiles])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   // Watch for new commit operations starting
   useEffect(() => {

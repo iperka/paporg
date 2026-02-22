@@ -7,13 +7,15 @@ use tokio::sync::broadcast;
 
 use crate::gitops::progress::{GitOperationType, GitProgressEvent, OperationProgress};
 
+type OperationRegistry = HashMap<String, (Arc<AtomicBool>, GitOperationType)>;
+
 /// Broadcasts git operation progress events for streaming.
 /// Also tracks active operations so they can be cancelled.
 #[derive(Clone)]
 pub struct GitProgressBroadcaster {
     sender: Arc<broadcast::Sender<GitProgressEvent>>,
     /// Registry of active operations for cancellation support.
-    active_operations: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    active_operations: Arc<Mutex<OperationRegistry>>,
 }
 
 impl GitProgressBroadcaster {
@@ -44,7 +46,7 @@ impl GitProgressBroadcaster {
         let op_id = progress.operation_id().to_string();
         let token = progress.cancellation_token();
         if let Ok(mut ops) = self.active_operations.lock() {
-            ops.insert(op_id, token);
+            ops.insert(op_id, (token, operation_type));
         }
         progress
     }
@@ -53,14 +55,10 @@ impl GitProgressBroadcaster {
     /// Returns true if the operation was found and cancelled.
     pub fn cancel_operation(&self, operation_id: &str) -> bool {
         if let Ok(mut ops) = self.active_operations.lock() {
-            if let Some(token) = ops.remove(operation_id) {
+            if let Some((token, op_type)) = ops.remove(operation_id) {
                 token.store(true, std::sync::atomic::Ordering::Release);
                 // Send a failed event
-                let event = GitProgressEvent::failed(
-                    operation_id,
-                    GitOperationType::Commit, // Type doesn't matter much for cancel
-                    "Operation cancelled",
-                );
+                let event = GitProgressEvent::failed(operation_id, op_type, "Operation cancelled");
                 let _ = self.sender.send(event);
                 return true;
             }

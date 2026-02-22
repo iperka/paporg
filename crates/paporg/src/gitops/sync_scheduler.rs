@@ -79,6 +79,7 @@ impl SyncScheduler {
                     }
 
                     let progress = broadcaster.start_operation(GitOperationType::Pull);
+                    let op_id = progress.operation_id().to_string();
                     match {
                         use tracing::Instrument;
                         reconciler
@@ -96,6 +97,7 @@ impl SyncScheduler {
                         Err(e) => log::error!("Git sync failed: {}", e),
                         _ => {}
                     }
+                    broadcaster.complete_operation(&op_id);
                 }
             });
         });
