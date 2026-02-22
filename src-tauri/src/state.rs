@@ -468,7 +468,7 @@ pub fn ensure_config_initialized(config_dir: &PathBuf) -> Result<(), String> {
             r#"apiVersion: paporg.io/v1
 kind: Settings
 metadata:
-  name: default
+  name: settings
 spec:
   inputDirectory: "{}"
   outputDirectory: "{}"

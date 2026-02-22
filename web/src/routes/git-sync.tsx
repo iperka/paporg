@@ -445,10 +445,13 @@ export function GitSyncPage() {
 
   // Refresh git status when configured mode is shown, track completion
   useEffect(() => {
-    if (setupMode === 'configured') {
-      setStatusChecked(false)
-      refreshGitStatus().finally(() => setStatusChecked(true))
-    }
+    if (setupMode !== 'configured') return
+    let active = true
+    setStatusChecked(false)
+    refreshGitStatus().finally(() => {
+      if (active) setStatusChecked(true)
+    })
+    return () => { active = false }
   }, [setupMode, refreshGitStatus])
 
   // Track if initial load has determined the mode
@@ -590,15 +593,16 @@ export function GitSyncPage() {
         ? (yaml.load(selectedResource.yaml) as SettingsResource)?.metadata
         : null
 
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: dataToSave,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      const success = await updateResource('Settings', 'settings', newYaml)
+      const success = await updateResource('Settings', metadata.name, newYaml)
 
       if (success) {
         // Reload config so backend picks up the new settings
@@ -654,14 +658,15 @@ export function GitSyncPage() {
         : null
 
       // Save settings with enabled: true so backend can connect to the repo
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: { ...formData, git: { ...formData.git, enabled: true } },
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
-      await updateResource('Settings', 'settings', newYaml)
+      await updateResource('Settings', metadata.name, newYaml)
 
       // Reload config so backend picks up the new settings
       await api.config.reload()
@@ -724,14 +729,15 @@ export function GitSyncPage() {
         ? (yaml.load(selectedResource.yaml) as SettingsResource)?.metadata
         : null
 
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: newFormData,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
-      await updateResource('Settings', 'settings', newYaml)
+      await updateResource('Settings', metadata.name, newYaml)
 
       // Reload config so backend picks up the reset settings
       await api.config.reload()
@@ -798,8 +804,9 @@ export function GitSyncPage() {
   if (setupMode === 'configured' && isConfigured && needsInitialization) {
     if (!statusChecked) {
       return (
-        <div className="flex items-center justify-center py-16">
+        <div className="flex items-center justify-center py-16" role="status" aria-label="Checking repository status">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="sr-only">Checking repository status</span>
         </div>
       )
     }
