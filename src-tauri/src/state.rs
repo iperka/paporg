@@ -501,6 +501,27 @@ spec:
         }
     }
 
+    // Create .gitignore to prevent logs, database, and temp files from being
+    // committed when git sync is enabled on the config directory.
+    let gitignore_path = config_dir.join(".gitignore");
+    if !gitignore_path.exists() {
+        let gitignore = "\
+# Logs
+logs/
+
+# SQLite database
+*.db
+*.db-wal
+*.db-shm
+
+# Temporary upload inbox
+inbox/
+";
+        if let Err(e) = fs::write(&gitignore_path, gitignore) {
+            warn!("Failed to write .gitignore: {}", e);
+        }
+    }
+
     // Create a sample rule file if no rules exist
     let sample_rule_path = rules_dir.join("sample-invoice.yaml");
     if !sample_rule_path.exists()
