@@ -8,10 +8,14 @@ use std::time::Duration;
 
 use log::{debug, error, info, warn};
 use paporg::broadcast::{GitProgressBroadcaster, JobProgressBroadcaster, JobStore, LogBroadcaster};
+use paporg::gitops::watcher::ConfigChangeEvent;
+use paporg::gitops::reconciler::GitReconciler;
+use paporg::gitops::sync_scheduler::SyncScheduler;
 use paporg::gitops::LoadedConfig;
 use paporg::pipeline::PipelineConfig;
 use paporg::worker::{MultiSourceScanner, WorkerPool};
 use tokio::sync::broadcast;
+use tokio::sync::RwLock;
 
 /// Application state managed by Tauri.
 pub struct TauriAppState {
@@ -48,6 +52,18 @@ pub struct TauriAppState {
 
     /// Scanner shutdown flag.
     pub scanner_shutdown: Arc<AtomicBool>,
+
+    /// Config change broadcast sender (reconciler → listener).
+    pub config_change_sender: broadcast::Sender<ConfigChangeEvent>,
+
+    /// Git sync trigger channel.
+    pub sync_trigger_tx: broadcast::Sender<()>,
+
+    /// Git reconciler (pull → notify).
+    pub reconciler: Option<Arc<GitReconciler>>,
+
+    /// Background sync scheduler.
+    pub sync_scheduler: Option<SyncScheduler>,
 }
 
 impl TauriAppState {
@@ -55,6 +71,8 @@ impl TauriAppState {
     pub fn new() -> Self {
         let (reload_tx, _) = broadcast::channel(16);
         let (process_tx, _) = broadcast::channel(16);
+        let (config_change_sender, _) = broadcast::channel(16);
+        let (sync_trigger_tx, _) = broadcast::channel(16);
 
         Self {
             config_dir: None,
@@ -68,6 +86,10 @@ impl TauriAppState {
             process_tx,
             workers_running: false,
             scanner_shutdown: Arc::new(AtomicBool::new(false)),
+            config_change_sender,
+            sync_trigger_tx,
+            reconciler: None,
+            sync_scheduler: None,
         }
     }
 
@@ -265,6 +287,99 @@ impl TauriAppState {
     /// Triggers document processing.
     pub fn trigger_processing(&self) {
         let _ = self.process_tx.send(());
+    }
+
+    /// Sets up git sync: creates the reconciler and optionally starts the background scheduler.
+    /// Also wires up the config change listener so git-pulled changes auto-reload the UI.
+    pub fn setup_git_sync(
+        &mut self,
+        app: &tauri::AppHandle,
+        state_arc: Arc<RwLock<TauriAppState>>,
+    ) -> Result<(), String> {
+        use paporg::gitops::git::GitRepository;
+
+        let config_dir = self
+            .config_dir
+            .as_ref()
+            .ok_or("setup_git_sync: no config_dir set")?
+            .clone();
+
+        let git_settings = self
+            .config()
+            .ok_or("setup_git_sync: configuration not loaded")?
+            .settings
+            .resource
+            .spec
+            .git
+            .clone();
+
+        if !git_settings.enabled {
+            info!("Git sync not started: git is disabled in settings");
+            return Ok(());
+        }
+
+        // Stop existing scheduler to prevent thread leak
+        if let Some(scheduler) = self.sync_scheduler.take() {
+            scheduler.stop();
+        }
+
+        let repo = GitRepository::new(&config_dir, git_settings.clone());
+        let reconciler = Arc::new(GitReconciler::new(
+            repo,
+            self.config_change_sender.clone(),
+        ));
+        self.reconciler = Some(Arc::clone(&reconciler));
+
+        // Start background sync if interval > 0
+        if git_settings.sync_interval > 0 {
+            let scheduler = SyncScheduler::new(
+                reconciler,
+                Duration::from_secs(git_settings.sync_interval),
+                self.git_broadcaster.clone(),
+            );
+            scheduler.start(self.sync_trigger_tx.subscribe());
+            self.sync_scheduler = Some(scheduler);
+        }
+
+        // Wire up the config change listener
+        Self::start_config_change_listener(
+            app.clone(),
+            state_arc,
+            self.config_change_sender.subscribe(),
+        );
+
+        Ok(())
+    }
+
+    /// Starts a config change listener that auto-reloads when git changes are detected.
+    /// Subscribes to reconciler events and reloads config + notifies UI.
+    pub fn start_config_change_listener(
+        app: tauri::AppHandle,
+        state: Arc<RwLock<TauriAppState>>,
+        mut change_rx: broadcast::Receiver<ConfigChangeEvent>,
+    ) {
+        tokio::spawn(async move {
+            loop {
+                match change_rx.recv().await {
+                    Ok(event) => {
+                        info!("Config change event: {:?}", event.change_type);
+                        let mut state_write = state.write().await;
+                        if let Err(e) = state_write.reload() {
+                            error!("Failed to reload config after git sync: {}", e);
+                        }
+                        drop(state_write);
+                        crate::events::emit_config_changed(&app);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("Config change listener lagged by {} events", n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("Config change channel closed, stopping listener");
+                        break;
+                    }
+                }
+            }
+        });
     }
 }
 
