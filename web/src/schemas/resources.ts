@@ -74,14 +74,7 @@ export type VariableTransform = z.infer<typeof variableTransformSchema>
 
 export const variableSpecSchema = z.object({
   pattern: z.string().min(1, 'Pattern is required').refine(
-    (val) => {
-      try {
-        new RegExp(val)
-        return true
-      } catch {
-        return false
-      }
-    },
+    (val) => validateRegexPattern(val).valid,
     { message: 'Invalid regex pattern' }
   ),
   transform: variableTransformSchema,
@@ -505,9 +498,14 @@ export function isCompoundMatch(condition: MatchCondition): boolean {
 // Validation helpers
 // ============================================
 
+/** Convert Rust-style named groups `(?P<name>...)` to JS-style `(?<name>...)` for validation. */
+function toJsRegex(pattern: string): string {
+  return pattern.replace(/\(\?P</g, '(?<')
+}
+
 export function validateRegexPattern(pattern: string): { valid: boolean; error?: string } {
   try {
-    new RegExp(pattern)
+    new RegExp(toJsRegex(pattern))
     return { valid: true }
   } catch (e) {
     return { valid: false, error: e instanceof Error ? e.message : 'Invalid regex' }
