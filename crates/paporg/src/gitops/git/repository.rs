@@ -348,8 +348,7 @@ impl GitRepository {
                     let base = String::from_utf8_lossy(&base_output.stdout)
                         .trim()
                         .to_string();
-                    let merge_tree =
-                        self.run_git(&["merge-tree", &base, "HEAD", &remote_ref]);
+                    let merge_tree = self.run_git(&["merge-tree", &base, "HEAD", &remote_ref]);
                     if let Ok(tree_output) = merge_tree {
                         let tree_text = String::from_utf8_lossy(&tree_output.stdout);
                         for line in tree_text.lines() {
@@ -738,7 +737,10 @@ impl GitRepository {
             progress.completed("Fetch completed");
             Ok(())
         } else {
-            let error = format!("Fetch failed with exit code {}", status.code().unwrap_or(-1));
+            let error = format!(
+                "Fetch failed with exit code {}",
+                status.code().unwrap_or(-1)
+            );
             progress.failed(&error);
             Err(GitOpsError::GitOperation(error))
         }

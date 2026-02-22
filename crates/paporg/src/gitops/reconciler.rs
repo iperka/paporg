@@ -81,7 +81,11 @@ mod tests {
     use crate::gitops::resource::GitSettings;
     use tempfile::TempDir;
 
-    fn setup_reconciler() -> (TempDir, GitReconciler, broadcast::Receiver<ConfigChangeEvent>) {
+    fn setup_reconciler() -> (
+        TempDir,
+        GitReconciler,
+        broadcast::Receiver<ConfigChangeEvent>,
+    ) {
         let dir = TempDir::new().unwrap();
         let repo = GitRepository::new(dir.path(), GitSettings::default());
         let (tx, rx) = broadcast::channel(16);
@@ -96,8 +100,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         let broadcaster = crate::broadcast::GitProgressBroadcaster::default();
-        let progress =
-            broadcaster.start_operation(crate::gitops::progress::GitOperationType::Pull);
+        let progress = broadcaster.start_operation(crate::gitops::progress::GitOperationType::Pull);
 
         let result = rt.block_on(reconciler.reconcile(&progress));
         assert!(result.is_err());
@@ -121,8 +124,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let broadcaster = crate::broadcast::GitProgressBroadcaster::default();
-        let progress =
-            broadcaster.start_operation(crate::gitops::progress::GitOperationType::Pull);
+        let progress = broadcaster.start_operation(crate::gitops::progress::GitOperationType::Pull);
 
         // Pull will fail because no remote is configured, which is fine
         let result = rt.block_on(reconciler.reconcile(&progress));

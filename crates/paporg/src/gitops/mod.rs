@@ -18,8 +18,8 @@ pub mod validation;
 pub mod watcher;
 
 pub use error::{GitOpsError, Result};
-pub use git::GitRepository;
 pub use git::types::*;
+pub use git::GitRepository;
 pub use loader::FileTreeNode;
 pub use loader::{ConfigLoader, LoadedConfig};
 pub use reconciler::GitReconciler;

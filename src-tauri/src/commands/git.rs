@@ -18,10 +18,7 @@ use crate::state::TauriAppState;
 
 /// Helper to reload config and emit a config-changed event.
 /// Used by commands that modify the working tree (checkout, merge, initialize).
-async fn reload_and_notify(
-    app: &tauri::AppHandle,
-    state: &State<'_, Arc<RwLock<TauriAppState>>>,
-) {
+async fn reload_and_notify(app: &tauri::AppHandle, state: &State<'_, Arc<RwLock<TauriAppState>>>) {
     let mut state_write = state.write().await;
     if let Err(e) = state_write.reload() {
         log::error!("Failed to reload config after git operation: {}", e);
@@ -90,7 +87,11 @@ pub async fn git_pull(
 
     let reconciler = match &state_guard.reconciler {
         Some(r) => Arc::clone(r),
-        None => return Ok(ApiResponse::err("Git not initialized. Run initialize first.")),
+        None => {
+            return Ok(ApiResponse::err(
+                "Git not initialized. Run initialize first.",
+            ))
+        }
     };
 
     let broadcaster = state_guard.git_broadcaster.clone();

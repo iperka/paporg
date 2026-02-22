@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use log::{debug, error, info, warn};
 use paporg::broadcast::{GitProgressBroadcaster, JobProgressBroadcaster, JobStore, LogBroadcaster};
-use paporg::gitops::watcher::ConfigChangeEvent;
 use paporg::gitops::reconciler::GitReconciler;
 use paporg::gitops::sync_scheduler::SyncScheduler;
+use paporg::gitops::watcher::ConfigChangeEvent;
 use paporg::gitops::LoadedConfig;
 use paporg::pipeline::PipelineConfig;
 use paporg::worker::{MultiSourceScanner, WorkerPool};
@@ -324,10 +324,7 @@ impl TauriAppState {
         }
 
         let repo = GitRepository::new(&config_dir, git_settings.clone());
-        let reconciler = Arc::new(GitReconciler::new(
-            repo,
-            self.config_change_sender.clone(),
-        ));
+        let reconciler = Arc::new(GitReconciler::new(repo, self.config_change_sender.clone()));
         self.reconciler = Some(Arc::clone(&reconciler));
 
         // Start background sync if interval > 0

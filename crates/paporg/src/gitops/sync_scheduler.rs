@@ -109,11 +109,7 @@ mod tests {
         let reconciler = Arc::new(GitReconciler::new(repo, change_tx));
         let broadcaster = Arc::new(GitProgressBroadcaster::default());
 
-        let scheduler = SyncScheduler::new(
-            reconciler,
-            Duration::from_millis(50),
-            broadcaster,
-        );
+        let scheduler = SyncScheduler::new(reconciler, Duration::from_millis(50), broadcaster);
 
         let (trigger_tx, trigger_rx) = broadcast::channel(16);
         let handle = scheduler.start(trigger_rx);

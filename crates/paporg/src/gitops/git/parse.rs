@@ -110,10 +110,7 @@ mod tests {
         #[test]
         fn test_format_git_error_stderr_only() {
             let output = make_output(1, b"", b"fatal: not a git repository");
-            assert_eq!(
-                format_git_error(&output),
-                "fatal: not a git repository"
-            );
+            assert_eq!(format_git_error(&output), "fatal: not a git repository");
         }
 
         #[test]
