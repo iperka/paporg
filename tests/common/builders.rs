@@ -252,10 +252,14 @@ impl RuleBuilder {
     }
 
     /// Set case sensitivity on the current match condition.
-    /// Only applies to Simple match conditions.
     pub fn case_sensitive(mut self, sensitive: bool) -> Self {
-        if let MatchCondition::Simple(ref mut simple) = self.match_condition {
-            simple.case_sensitive = Some(sensitive);
+        match &mut self.match_condition {
+            MatchCondition::Simple(ref mut simple) => {
+                simple.case_sensitive = Some(sensitive);
+            }
+            MatchCondition::Compound(ref mut compound) => {
+                compound.case_sensitive = Some(sensitive);
+            }
         }
         self
     }

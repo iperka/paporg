@@ -78,9 +78,12 @@ impl Categorizer {
     }
 
     pub fn categorize(&self, text: &str) -> CategorizationResult {
+        // Pre-compute lowercase text once for case-insensitive matching
+        let text_lower = text.to_lowercase();
+
         // Find first matching rule (default: case-insensitive)
         for rule in &self.rules {
-            if self.matches(&rule.match_condition, text, false) {
+            if self.matches(&rule.match_condition, text, &text_lower, false) {
                 return CategorizationResult {
                     rule_id: Some(rule.id.clone()),
                     category: rule.category.clone(),
@@ -99,12 +102,20 @@ impl Categorizer {
         }
     }
 
-    fn matches(&self, condition: &MatchCondition, text: &str, case_sensitive: bool) -> bool {
+    fn matches(
+        &self,
+        condition: &MatchCondition,
+        text: &str,
+        text_lower: &str,
+        case_sensitive: bool,
+    ) -> bool {
         match condition {
             MatchCondition::Compound(compound) => {
-                self.matches_compound(compound, text, case_sensitive)
+                self.matches_compound(compound, text, text_lower, case_sensitive)
             }
-            MatchCondition::Simple(simple) => self.matches_simple(simple, text, case_sensitive),
+            MatchCondition::Simple(simple) => {
+                self.matches_simple(simple, text, text_lower, case_sensitive)
+            }
         }
     }
 
@@ -112,6 +123,7 @@ impl Categorizer {
         &self,
         compound: &CompoundMatch,
         text: &str,
+        text_lower: &str,
         inherited_case_sensitive: bool,
     ) -> bool {
         let case_sensitive = compound.case_sensitive.unwrap_or(inherited_case_sensitive);
@@ -120,19 +132,19 @@ impl Categorizer {
         if let Some(all) = &compound.all {
             return all
                 .iter()
-                .all(|cond| self.matches(cond, text, case_sensitive));
+                .all(|cond| self.matches(cond, text, text_lower, case_sensitive));
         }
 
         // Handle 'any' - at least one condition must match
         if let Some(any) = &compound.any {
             return any
                 .iter()
-                .any(|cond| self.matches(cond, text, case_sensitive));
+                .any(|cond| self.matches(cond, text, text_lower, case_sensitive));
         }
 
         // Handle 'not' - condition must not match
         if let Some(not) = &compound.not {
-            return !self.matches(not, text, case_sensitive);
+            return !self.matches(not, text, text_lower, case_sensitive);
         }
 
         false
@@ -142,6 +154,7 @@ impl Categorizer {
         &self,
         simple: &SimpleMatch,
         text: &str,
+        text_lower: &str,
         inherited_case_sensitive: bool,
     ) -> bool {
         let case_sensitive = simple.case_sensitive.unwrap_or(inherited_case_sensitive);
@@ -151,7 +164,6 @@ impl Categorizer {
             if case_sensitive {
                 return text.contains(contains.as_str());
             } else {
-                let text_lower = text.to_lowercase();
                 return text_lower.contains(&contains.to_lowercase());
             }
         }
@@ -161,7 +173,6 @@ impl Categorizer {
             if case_sensitive {
                 return contains_any.iter().any(|s| text.contains(s.as_str()));
             } else {
-                let text_lower = text.to_lowercase();
                 return contains_any
                     .iter()
                     .any(|s| text_lower.contains(&s.to_lowercase()));
@@ -173,7 +184,6 @@ impl Categorizer {
             if case_sensitive {
                 return contains_all.iter().all(|s| text.contains(s.as_str()));
             } else {
-                let text_lower = text.to_lowercase();
                 return contains_all
                     .iter()
                     .all(|s| text_lower.contains(&s.to_lowercase()));

@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,17 +33,21 @@ export function MatchConditionBuilder({
   onChange,
   depth = 0,
 }: MatchConditionBuilderProps) {
+  const uniqueId = useId()
   const type = getMatchConditionType(condition)
 
   const caseSensitive = 'caseSensitive' in condition ? condition.caseSensitive : undefined
 
-  const handleTypeChange = (newType: MatchConditionType) => {
-    const newCondition = createMatchConditionOfType(newType)
-    // Preserve caseSensitive when switching types
+  /** Spread caseSensitive onto a new condition object if it was set. */
+  const withCaseSensitive = (cond: MatchCondition): MatchCondition => {
     if (caseSensitive !== undefined) {
-      ;(newCondition as Record<string, unknown>).caseSensitive = caseSensitive
+      ;(cond as Record<string, unknown>).caseSensitive = caseSensitive
     }
-    onChange(newCondition as MatchCondition)
+    return cond
+  }
+
+  const handleTypeChange = (newType: MatchConditionType) => {
+    onChange(withCaseSensitive(createMatchConditionOfType(newType)))
   }
 
   const handleCaseSensitiveChange = (checked: boolean) => {
@@ -60,7 +65,7 @@ export function MatchConditionBuilder({
       return (
         <Input
           value={condition.contains}
-          onChange={(e) => onChange({ contains: e.target.value })}
+          onChange={(e) => onChange(withCaseSensitive({ contains: e.target.value }))}
           placeholder="Text to search for..."
           className="font-mono"
         />
@@ -71,7 +76,7 @@ export function MatchConditionBuilder({
       return (
         <Input
           value={condition.pattern}
-          onChange={(e) => onChange({ pattern: e.target.value })}
+          onChange={(e) => onChange(withCaseSensitive({ pattern: e.target.value }))}
           placeholder="Regex pattern..."
           className="font-mono"
         />
@@ -82,7 +87,7 @@ export function MatchConditionBuilder({
       return (
         <StringArrayEditor
           values={condition.containsAny}
-          onChange={(values) => onChange({ containsAny: values })}
+          onChange={(values) => onChange(withCaseSensitive({ containsAny: values }))}
           placeholder="Add text..."
         />
       )
@@ -92,7 +97,7 @@ export function MatchConditionBuilder({
       return (
         <StringArrayEditor
           values={condition.containsAll}
-          onChange={(values) => onChange({ containsAll: values })}
+          onChange={(values) => onChange(withCaseSensitive({ containsAll: values }))}
           placeholder="Add text..."
         />
       )
@@ -114,7 +119,7 @@ export function MatchConditionBuilder({
       return (
         <CompoundConditionList
           conditions={condition.all}
-          onChange={(conditions) => onChange({ all: conditions })}
+          onChange={(conditions) => onChange(withCaseSensitive({ all: conditions }))}
           depth={depth}
           label="All conditions must match (AND)"
         />
@@ -125,7 +130,7 @@ export function MatchConditionBuilder({
       return (
         <CompoundConditionList
           conditions={condition.any}
-          onChange={(conditions) => onChange({ any: conditions })}
+          onChange={(conditions) => onChange(withCaseSensitive({ any: conditions }))}
           depth={depth}
           label="Any condition must match (OR)"
         />
@@ -140,7 +145,7 @@ export function MatchConditionBuilder({
           </Label>
           <MatchConditionBuilder
             condition={condition.not}
-            onChange={(c) => onChange({ not: c })}
+            onChange={(c) => onChange(withCaseSensitive({ not: c }))}
             depth={depth + 1}
           />
         </div>
@@ -185,11 +190,11 @@ export function MatchConditionBuilder({
         </Select>
 
         <div className="flex items-center gap-2 ml-auto">
-          <Label htmlFor={`case-sensitive-${depth}`} className="text-xs text-muted-foreground cursor-pointer">
+          <Label htmlFor={`${uniqueId}-case-sensitive`} className="text-xs text-muted-foreground cursor-pointer">
             Case Sensitive
           </Label>
           <Switch
-            id={`case-sensitive-${depth}`}
+            id={`${uniqueId}-case-sensitive`}
             checked={caseSensitive === true}
             onCheckedChange={handleCaseSensitiveChange}
           />
