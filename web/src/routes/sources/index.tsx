@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useFileTree } from '@/queries/use-file-tree'
 import { useCreateDirectory } from '@/mutations/use-gitops-mutations'
-import { FolderInput, Plus, FolderPlus } from 'lucide-react'
+import { FolderInput, Plus, FolderPlus, Loader2 } from 'lucide-react'
 import { FolderTreeView } from '@/components/organization/FolderTreeView'
 import { CreateFolderDialog } from '@/components/organization/CreateFolderDialog'
 import { useToast } from '@/components/ui/use-toast'
@@ -17,23 +17,21 @@ export function SourcesPage() {
   const [showFolderDialog, setShowFolderDialog] = useState(false)
 
   // Extract import sources from file tree
-  const getSources = (): { name: string; path: string }[] => {
+  const sources = useMemo(() => {
     if (isTreeLoading || !fileTree) return []
-    const sources: { name: string; path: string }[] = []
+    const items: { name: string; path: string }[] = []
 
     const traverse = (node: FileTreeNode | null) => {
       if (!node) return
       if (node.resource?.kind === 'ImportSource') {
-        sources.push({ name: node.resource.name, path: node.path })
+        items.push({ name: node.resource.name, path: node.path })
       }
       node.children.forEach(traverse)
     }
 
     traverse(fileTree)
-    return sources.sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  const sources = getSources()
+    return items.sort((a, b) => a.name.localeCompare(b.name))
+  }, [fileTree, isTreeLoading])
 
   const handleCreateFolder = async (name: string) => {
     const path = `sources/${name}`
@@ -74,7 +72,11 @@ export function SourcesPage() {
         </div>
       </div>
 
-      {sources.length === 0 ? (
+      {isTreeLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : sources.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FolderInput className="h-12 w-12 text-muted-foreground mb-4" />

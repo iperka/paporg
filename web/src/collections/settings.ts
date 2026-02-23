@@ -17,9 +17,9 @@ export const settingsCollection = createCollection(
       if (resources.length === 0) return []
       const resource = await api.gitops.getResource('Settings', resources[0].name)
       try {
-        const parsed = yaml.load(resource.yaml) as SettingsResource | undefined
-        if (!parsed) return []
-        return [{ id: 'settings', ...parsed } as SettingsItem]
+        const parsed = yaml.load(resource.yaml)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+        return [{ id: 'settings', ...(parsed as SettingsResource) } as SettingsItem]
       } catch (err) {
         console.error('Failed to parse Settings YAML:', err)
         return []

@@ -125,18 +125,21 @@ export function SettingsPage() {
   const handleAutoSave = useCallback(async () => {
     if (!isValidForSave) return
 
+    // Snapshot values before async save to avoid overwriting concurrent edits
+    const savedValues = structuredClone(formValues)
+
     const resource: SettingsResource = {
       apiVersion: 'paporg.io/v1',
       kind: 'Settings',
       metadata: { name: effectiveSettingsName, labels: {}, annotations: {} },
-      spec: formValues,
+      spec: savedValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
     try {
       await updateResourceMut.mutateAsync({ kind: 'Settings', name: effectiveSettingsName, yamlContent: newYaml })
       // Reset form baseline after save (updates default values to current)
-      form.reset(formValues)
+      form.reset(savedValues)
     } catch {
       throw new Error('Failed to save')
     }

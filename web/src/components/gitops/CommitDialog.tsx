@@ -70,6 +70,13 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  // Re-sync selected files when allFiles loads after dialog opens
+  useEffect(() => {
+    if (open && allFiles.length > 0 && selectedFiles.size === 0) {
+      setSelectedFiles(new Set(allFiles.map((f) => f.path)))
+    }
+  }, [open, allFiles, selectedFiles.size])
+
   // Watch for new commit operations starting
   useEffect(() => {
     if (gitCommitMut.isPending && !currentOperationId) {
@@ -377,7 +384,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
               {isCompleted ? 'Close' : 'Cancel'}
             </Button>
             {!isCompleted && (
-              <Button type="submit" disabled={gitCommitMut.isPending || isInProgress || !message.trim() || selectedFiles.size === 0}>
+              <Button type="submit" disabled={gitCommitMut.isPending || isInProgress || isGenerating || !message.trim() || selectedFiles.size === 0}>
                 {isInProgress ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

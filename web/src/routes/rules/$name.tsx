@@ -244,7 +244,7 @@ export function RuleEditPage() {
 
   // Delete handler
   const handleDelete = async () => {
-    if (isNew) return
+    if (isNew || isSaving) return
 
     const confirmed = window.confirm(`Are you sure you want to delete the rule "${urlName}"?`)
     if (!confirmed) return

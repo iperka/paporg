@@ -11,6 +11,7 @@ import { VariableForm } from '@/components/forms/VariableForm'
 import { useAutoSave } from '@/hooks/useAutoSave'
 import { useForm, useStore } from '@tanstack/react-form'
 import {
+  type VariableSpec,
   type VariableResource,
   createDefaultVariableSpec,
   variableSpecSchema,
@@ -158,7 +159,7 @@ export function VariableEditPage() {
         const validated = variableSpecSchema.safeParse(parsed.spec)
         if (validated.success) {
           for (const [key, val] of Object.entries(validated.data)) {
-            form.setFieldValue(key as 'pattern' | 'transform' | 'default', val as never)
+            form.setFieldValue(key as keyof VariableSpec, val as never)
           }
           if (parsed.metadata?.name) {
             setResourceName(parsed.metadata.name)
@@ -228,7 +229,7 @@ export function VariableEditPage() {
 
   // Delete handler
   const handleDelete = async () => {
-    if (isNew) return
+    if (isNew || isSaving) return
 
     const confirmed = window.confirm(`Are you sure you want to delete the variable "${urlName}"?`)
     if (!confirmed) return
