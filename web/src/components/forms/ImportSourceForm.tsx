@@ -45,6 +45,10 @@ export function ImportSourceForm({
     form.reset({ ...newSpec, enabled: currentEnabled })
   }
 
+  // Subscribe to auth fields for reactive SecretField props
+  const passwordFile: string | undefined = useStore(form.store, (state) => state.values.email?.auth?.passwordFile)
+  const passwordEnvVar: string | undefined = useStore(form.store, (state) => state.values.email?.auth?.passwordEnvVar)
+
   // All mutually exclusive password auth fields
   type EmailAuthField = 'passwordEnvVar' | 'passwordFile' | 'passwordInsecure'
   const PASSWORD_AUTH_FIELDS: EmailAuthField[] = ['passwordEnvVar', 'passwordFile', 'passwordInsecure']
@@ -280,8 +284,8 @@ export function ImportSourceForm({
                 label="Password"
                 sourceName={isNew ? (name || 'new-source') : (name ?? '')}
                 secretType="password"
-                filePath={form.getFieldValue('email.auth.passwordFile')}
-                envVar={form.getFieldValue('email.auth.passwordEnvVar')}
+                filePath={passwordFile}
+                envVar={passwordEnvVar}
                 onFilePathChange={(v) => updateAuthField('passwordFile', v)}
                 onEnvVarChange={(v) => updateAuthField('passwordEnvVar', v)}
                 description="Your email password or app-specific password"

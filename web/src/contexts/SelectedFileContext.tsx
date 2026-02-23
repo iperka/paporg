@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
 import { api } from '@/api'
 import { useFileTree } from '@/queries/use-file-tree'
 import type { ResourceDetail, ResourceKind, FileTreeNode } from '@/types/gitops'
@@ -23,9 +23,11 @@ export function SelectedFileProvider({ children }: { children: React.ReactNode }
   const { data: fileTree } = useFileTree()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedResource, setSelectedResource] = useState<ResourceDetail | null>(null)
+  const requestIdRef = useRef(0)
 
   const selectFile = useCallback(
     async (path: string) => {
+      const requestId = ++requestIdRef.current
       setSelectedPath(path)
 
       const findResource = (
@@ -41,32 +43,38 @@ export function SelectedFileProvider({ children }: { children: React.ReactNode }
         return null
       }
 
-      if (!fileTree) return
+      if (!fileTree) {
+        setSelectedResource(null)
+        return
+      }
 
       const resourceInfo = findResource(fileTree)
       if (!resourceInfo) {
         try {
           const content = await api.files.readRaw(path)
+          if (requestIdRef.current !== requestId) return
           setSelectedResource({
             name: path.split('/').pop() || path,
             path,
             yaml: content,
           })
-        } catch {
-          // File not found
+        } catch (err) {
+          console.warn('SelectedFileContext: failed to read file', err)
         }
         return
       }
 
       try {
         const data = await api.gitops.getResource(resourceInfo.kind, resourceInfo.name)
+        if (requestIdRef.current !== requestId) return
         setSelectedResource({ name: data.name, path: data.path, yaml: data.yaml })
       } catch {
         try {
           const content = await api.files.readRaw(path)
+          if (requestIdRef.current !== requestId) return
           setSelectedResource({ name: resourceInfo.name, path, yaml: content })
-        } catch {
-          // Fallback failed
+        } catch (err) {
+          console.warn('SelectedFileContext: fallback file read failed', err)
         }
       }
     },

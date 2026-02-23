@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useGitStatus } from '@/queries/use-git-status'
-import { useGitPull } from '@/mutations/use-gitops-mutations'
+import { useGitPull, GIT_STATUS_KEYS } from '@/mutations/use-gitops-mutations'
 import { cn } from '@/lib/utils'
 
 interface GitStatusProps {
@@ -104,7 +104,7 @@ export function GitStatus({ onCommitClick }: GitStatusProps) {
           variant="ghost"
           size="icon"
           className="h-7 w-7"
-          onClick={() => qc.invalidateQueries({ queryKey: ['git', 'status'] })}
+          onClick={() => qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] })}
           disabled={isLoading}
           title="Refresh git status"
         >

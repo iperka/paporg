@@ -32,8 +32,6 @@ export function BranchSelector() {
   const { toast } = useToast()
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
-  const [isCreating, setIsCreating] = useState(false)
-
   const isLoading = checkoutBranchMut.isPending || createBranchMut.isPending
 
   if (!gitStatus?.isRepo) {
@@ -63,7 +61,6 @@ export function BranchSelector() {
   const handleCreateBranch = async () => {
     if (!newBranchName.trim()) return
 
-    setIsCreating(true)
     try {
       await createBranchMut.mutateAsync({ name: newBranchName.trim() })
       toast({
@@ -78,8 +75,6 @@ export function BranchSelector() {
         description: `Failed to create branch: ${newBranchName}`,
         variant: 'destructive',
       })
-    } finally {
-      setIsCreating(false)
     }
   }
 
@@ -166,8 +161,8 @@ export function BranchSelector() {
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateBranch} disabled={!newBranchName.trim() || isCreating}>
-              {isCreating ? 'Creating...' : 'Create'}
+            <Button onClick={handleCreateBranch} disabled={!newBranchName.trim() || createBranchMut.isPending}>
+              {createBranchMut.isPending ? 'Creating...' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>

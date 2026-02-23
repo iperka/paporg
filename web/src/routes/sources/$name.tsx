@@ -85,7 +85,7 @@ export function SourceEditPage() {
   // Check for unsaved changes
   const hasChanges = useMemo(() => {
     if (isNew) {
-      return resourceName.trim() !== '' || formValues.local?.path !== ''
+      return isDirty || resourceName.trim() !== '' || formValues.local?.path !== ''
     }
     return isDirty || resourceName !== initialName
   }, [formValues, resourceName, initialName, isNew, isDirty])
@@ -118,19 +118,23 @@ export function SourceEditPage() {
   const handleAutoSave = useCallback(async () => {
     if (isNew || !isValidForSave) return
 
+    // Snapshot values before async save to avoid overwriting concurrent edits
+    const savedValues = structuredClone(formValues)
+    const savedName = resourceName
+
     const resource: ImportSourceResource = {
       apiVersion: 'paporg.io/v1',
       kind: 'ImportSource',
-      metadata: { name: resourceName, labels: {}, annotations: {} },
-      spec: formValues,
+      metadata: { name: savedName, labels: {}, annotations: {} },
+      spec: savedValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
     try {
       await updateResourceMut.mutateAsync({ kind: 'ImportSource', name: urlName, yamlContent: newYaml })
       // Reset form baseline after save (updates default values to current)
-      form.reset(formValues)
-      setInitialName(resourceName)
+      form.reset(savedValues)
+      setInitialName(savedName)
     } catch {
       throw new Error('Failed to save')
     }

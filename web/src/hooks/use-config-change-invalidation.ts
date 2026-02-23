@@ -17,8 +17,7 @@ export function useConfigChangeInvalidation() {
     const setup = async () => {
       unlisten = await listen<ConfigChangeEvent>(
         'paporg://config-changed',
-        (event) => {
-          console.log('Config changed:', event.payload)
+        (_event) => {
           qc.invalidateQueries({ queryKey: ['gitops', 'file-tree'] })
           qc.invalidateQueries({ queryKey: ['git', 'status'] })
           qc.invalidateQueries({ queryKey: ['gitops', 'settings'] })

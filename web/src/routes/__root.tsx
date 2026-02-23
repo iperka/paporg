@@ -5,7 +5,7 @@ import { AppSidebar } from '@/components/layout/AppSidebar'
 import { SelectedFileProvider } from '@/contexts/SelectedFileContext'
 import { GitProgressProvider } from '@/contexts/GitProgressContext'
 import { JobsProvider } from '@/contexts/JobsContext'
-import { SseProvider } from '@/contexts/SseContext'
+import { LogStreamProvider } from '@/contexts/LogStreamContext'
 import { GitInitializeBanner } from '@/components/gitops/GitInitializeBanner'
 import { ConflictDialog } from '@/components/gitops/ConflictDialog'
 import { useState } from 'react'
@@ -26,7 +26,7 @@ export function RootLayout() {
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="paporg-theme">
-      <SseProvider>
+      <LogStreamProvider>
         <GitProgressProvider>
           <JobsProvider>
             <SelectedFileProvider>
@@ -52,7 +52,7 @@ export function RootLayout() {
             </SelectedFileProvider>
           </JobsProvider>
         </GitProgressProvider>
-      </SseProvider>
+      </LogStreamProvider>
     </ThemeProvider>
   )
 }

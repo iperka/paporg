@@ -7,6 +7,6 @@ export function useGitStatus(): { data: GitStatus | null; isLoading: boolean } {
   const items = result.data ?? []
   return {
     data: items.length > 0 ? (items[0] as GitStatus) : null,
-    isLoading: items.length === 0,
+    isLoading: result.isLoading,
   }
 }

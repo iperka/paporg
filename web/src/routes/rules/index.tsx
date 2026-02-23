@@ -11,13 +11,14 @@ import { useToast } from '@/components/ui/use-toast'
 import type { FileTreeNode } from '@/types/gitops'
 
 export function RulesPage() {
-  const { data: fileTree } = useFileTree()
+  const { data: fileTree, isLoading: isTreeLoading } = useFileTree()
   const createDirectoryMut = useCreateDirectory()
   const { toast } = useToast()
   const [showFolderDialog, setShowFolderDialog] = useState(false)
 
   // Extract rules from file tree
   const getRules = (): { name: string; path: string }[] => {
+    if (isTreeLoading || !fileTree) return []
     const rules: { name: string; path: string }[] = []
 
     const traverse = (node: FileTreeNode | null) => {
@@ -42,8 +43,8 @@ export function RulesPage() {
         title: 'Folder created',
         description: `Created folder "${name}"`,
       })
-    } catch {
-      throw new Error('Failed to create folder')
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'Failed to create folder')
     }
   }
 

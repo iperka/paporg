@@ -4,8 +4,8 @@ import yaml from 'js-yaml'
 import type { ResourceKind, InitializeResult } from '@/types/gitops'
 
 // Shared invalidation key sets
-const FILE_TREE_KEYS = ['gitops', 'file-tree'] as const
-const GIT_STATUS_KEYS = ['git', 'status'] as const
+export const FILE_TREE_KEYS = ['gitops', 'file-tree'] as const
+export const GIT_STATUS_KEYS = ['git', 'status'] as const
 const BRANCHES_KEYS = ['git', 'branches'] as const
 const SETTINGS_KEYS = ['gitops', 'settings'] as const
 const RESOURCES_KEYS = ['gitops', 'resources'] as const
@@ -43,7 +43,7 @@ export function useUpdateResource() {
       name,
       yamlContent,
     }: {
-      kind: string
+      kind: ResourceKind
       name: string
       yamlContent: string
     }) => {
@@ -63,7 +63,7 @@ export function useUpdateResource() {
 export function useDeleteResource() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async ({ kind, name }: { kind: string; name: string }) => {
+    mutationFn: async ({ kind, name }: { kind: ResourceKind; name: string }) => {
       await api.gitops.deleteResource(kind, name)
     },
     onSuccess: () => {

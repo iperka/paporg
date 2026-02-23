@@ -82,8 +82,8 @@ export function CreateResourceDialog({
     try {
       await createResourceMut.mutateAsync({ kind, yamlContent, path })
       onOpenChange(false)
-    } catch {
-      setSubmitError('Failed to create resource')
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to create resource')
     }
   }
 

@@ -42,8 +42,8 @@ export function VariablesPage() {
         title: 'Folder created',
         description: `Created folder "${name}"`,
       })
-    } catch {
-      throw new Error('Failed to create folder')
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'Failed to create folder')
     }
   }
 

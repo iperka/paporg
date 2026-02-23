@@ -7,6 +7,6 @@ export function useSettings(): { data: SettingsResource | null; isLoading: boole
   const items = result.data ?? []
   return {
     data: items.length > 0 ? (items[0] as SettingsResource) : null,
-    isLoading: items.length === 0,
+    isLoading: result.isLoading,
   }
 }

@@ -15,6 +15,7 @@ import {
   createDefaultVariableSpec,
   variableSpecSchema,
 } from '@/schemas/resources'
+import { zodFormValidator } from '@/lib/form-utils'
 import yaml from 'js-yaml'
 
 export function VariableEditPage() {
@@ -38,11 +39,11 @@ export function VariableEditPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // TanStack Form - zod schemas implement Standard Schema, no adapter needed
+  // TanStack Form - use function validator for Zod schemas with .default() fields
   const form = useForm({
     defaultValues: createDefaultVariableSpec(),
     validators: {
-      onChange: variableSpecSchema,
+      onChange: zodFormValidator(variableSpecSchema),
     },
     onSubmit: async () => {
       // Submit handled via handleSave
@@ -83,7 +84,7 @@ export function VariableEditPage() {
   // Check for unsaved changes
   const hasChanges = useMemo(() => {
     if (isNew) {
-      return resourceName.trim() !== '' || formValues.pattern !== '(?P<value>\\w+)'
+      return resourceName.trim() !== '' || isDirty
     }
     return isDirty || resourceName !== initialName
   }, [formValues, resourceName, initialName, isNew, isDirty])
@@ -116,19 +117,23 @@ export function VariableEditPage() {
   const handleAutoSave = useCallback(async () => {
     if (isNew || !isValidForSave) return
 
+    // Snapshot values before async save to avoid overwriting concurrent edits
+    const savedValues = structuredClone(formValues)
+    const savedName = resourceName
+
     const resource: VariableResource = {
       apiVersion: 'paporg.io/v1',
       kind: 'Variable',
-      metadata: { name: resourceName, labels: {}, annotations: {} },
-      spec: formValues,
+      metadata: { name: savedName, labels: {}, annotations: {} },
+      spec: savedValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
     try {
       await updateResourceMut.mutateAsync({ kind: 'Variable', name: urlName, yamlContent: newYaml })
       // Reset form baseline after save (updates default values to current)
-      form.reset(formValues)
-      setInitialName(resourceName)
+      form.reset(savedValues)
+      setInitialName(savedName)
     } catch {
       throw new Error('Failed to save')
     }

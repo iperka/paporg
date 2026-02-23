@@ -103,20 +103,22 @@ export function SettingsPage() {
   // Check if form is valid for auto-save
   const isValidForSave = canSubmit
 
+  const effectiveSettingsName = settingsName ?? 'settings'
+
   // Sync form changes to YAML
   useEffect(() => {
     try {
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: { name: 'settings', labels: {}, annotations: {} },
+        metadata: { name: effectiveSettingsName, labels: {}, annotations: {} },
         spec: formValues,
       }
       setYamlContent(yaml.dump(resource, { lineWidth: -1 }))
     } catch {
       // Ignore serialization errors while editing
     }
-  }, [formValues])
+  }, [formValues, effectiveSettingsName])
 
   // Auto-save handler
   const handleAutoSave = useCallback(async () => {
@@ -125,19 +127,19 @@ export function SettingsPage() {
     const resource: SettingsResource = {
       apiVersion: 'paporg.io/v1',
       kind: 'Settings',
-      metadata: { name: 'settings', labels: {}, annotations: {} },
+      metadata: { name: effectiveSettingsName, labels: {}, annotations: {} },
       spec: formValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
     try {
-      await updateResourceMut.mutateAsync({ kind: 'Settings', name: settingsName ?? 'settings', yamlContent: newYaml })
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: effectiveSettingsName, yamlContent: newYaml })
       // Reset form baseline after save (updates default values to current)
       form.reset(formValues)
     } catch {
       throw new Error('Failed to save')
     }
-  }, [isValidForSave, formValues, updateResourceMut, settingsName, form])
+  }, [isValidForSave, formValues, updateResourceMut, effectiveSettingsName, form])
 
   // Auto-save hook
   const { status: autoSaveStatus, lastSaved, error: autoSaveError } = useAutoSave({
@@ -181,12 +183,12 @@ export function SettingsPage() {
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: { name: 'settings', labels: {}, annotations: {} },
+        metadata: { name: effectiveSettingsName, labels: {}, annotations: {} },
         spec: formValues,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      await updateResourceMut.mutateAsync({ kind: 'Settings', name: settingsName ?? 'settings', yamlContent: newYaml })
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: effectiveSettingsName, yamlContent: newYaml })
 
       form.reset(formValues)
       toast({

@@ -24,7 +24,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useFileTree } from '@/queries/use-file-tree'
 import { useGitStatus } from '@/queries/use-git-status'
 import { useResource } from '@/queries/use-resource'
-import { useUpdateResource, useGitPull, useInitializeGit } from '@/mutations/use-gitops-mutations'
+import { useUpdateResource, useGitPull, useInitializeGit, GIT_STATUS_KEYS } from '@/mutations/use-gitops-mutations'
 
 type SetupMode = 'choose' | 'new' | 'existing' | 'configured'
 
@@ -461,7 +461,7 @@ export function GitSyncPage() {
   const initializeGitMut = useInitializeGit()
 
   // Compute derived state
-  const initialLoadComplete = fileTree !== null || gitStatus !== null
+  const initialLoadComplete = fileTree !== null && gitStatus !== null
 
   const [formData, setFormData] = useState<SettingsSpec>(createDefaultSettingsSpec())
   const [isSaving, setIsSaving] = useState(false)
@@ -491,7 +491,7 @@ export function GitSyncPage() {
     if (setupMode !== 'configured') return
     let active = true
     setStatusChecked(false)
-    qc.invalidateQueries({ queryKey: ['git', 'status'] }).finally(() => {
+    qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] }).finally(() => {
       if (active) setStatusChecked(true)
     })
     return () => { active = false }
@@ -613,9 +613,10 @@ export function GitSyncPage() {
     setError(null)
 
     try {
-      const existingMetadata = resourceData?.yaml
-        ? (yaml.load(resourceData.yaml) as SettingsResource)?.metadata
+      const parsed = resourceData?.yaml
+        ? yaml.load(resourceData.yaml) as SettingsResource | null
         : null
+      const existingMetadata = parsed?.metadata ?? null
 
       const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
@@ -648,7 +649,7 @@ export function GitSyncPage() {
   const handleSync = async () => {
     try {
       await gitPullMut.mutateAsync()
-      await qc.invalidateQueries({ queryKey: ['git', 'status'] })
+      await qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] })
       toast({
         title: 'Sync complete',
         description: 'Successfully synced with remote.',
@@ -745,9 +746,10 @@ export function GitSyncPage() {
 
     // Save the reset settings to disk
     try {
-      const existingMetadata = resourceData?.yaml
-        ? (yaml.load(resourceData.yaml) as SettingsResource)?.metadata
+      const parsed = resourceData?.yaml
+        ? yaml.load(resourceData.yaml) as SettingsResource | null
         : null
+      const existingMetadata = parsed?.metadata ?? null
 
       const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
@@ -1051,7 +1053,7 @@ export function GitSyncPage() {
             setCommitDialogOpen(open)
             // Refresh status when dialog closes
             if (!open) {
-              qc.invalidateQueries({ queryKey: ['git', 'status'] })
+              qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] })
             }
           }}
         />

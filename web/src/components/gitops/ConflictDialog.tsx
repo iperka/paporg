@@ -23,8 +23,6 @@ export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogPro
     const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     return `local-changes-${timestamp}`
   })
-  const [isCreating, setIsCreating] = useState(false)
-
   const isLoading = createBranchMut.isPending || gitCommitMut.isPending
 
   if (!open || !result) return null
@@ -39,14 +37,16 @@ export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogPro
       return
     }
 
-    setIsCreating(true)
-
     try {
       // First, commit any local changes
       try {
         await gitCommitMut.mutateAsync({ message: `Save local changes before merge (branch: ${branchName})` })
-      } catch {
-        // No changes to commit is fine, continue
+      } catch (err) {
+        // "nothing to commit" is expected when there are no staged changes — continue
+        const msg = err instanceof Error ? err.message : ''
+        if (!msg.toLowerCase().includes('nothing to commit')) {
+          throw err
+        }
       }
 
       // Create new branch with local changes
@@ -63,8 +63,6 @@ export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogPro
         description: error instanceof Error ? error.message : 'An unexpected error occurred',
         variant: 'destructive',
       })
-    } finally {
-      setIsCreating(false)
     }
   }
 
@@ -149,15 +147,15 @@ export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogPro
             <Button
               variant="ghost"
               onClick={() => onOpenChange(false)}
-              disabled={isCreating || isLoading}
+              disabled={isLoading}
             >
               Cancel
             </Button>
             <Button
               onClick={handleCreateBranch}
-              disabled={isCreating || isLoading || !branchName.trim()}
+              disabled={isLoading || !branchName.trim()}
             >
-              {isCreating ? (
+              {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   Creating...

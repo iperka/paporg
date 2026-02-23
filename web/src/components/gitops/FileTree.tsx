@@ -6,7 +6,7 @@ import { FileTreeItem } from './FileTreeItem'
 import { CreateResourceDialog } from './CreateResourceDialog'
 import { useFileTree } from '@/queries/use-file-tree'
 import { useSelectedFile } from '@/contexts/SelectedFileContext'
-import { useCreateDirectory, useDeleteFile } from '@/mutations/use-gitops-mutations'
+import { useCreateDirectory, useDeleteFile, FILE_TREE_KEYS } from '@/mutations/use-gitops-mutations'
 import { useQueryClient } from '@tanstack/react-query'
 import type { FileTreeNode, ResourceKind } from '@/types/gitops'
 
@@ -52,7 +52,11 @@ export function FileTree() {
         ? contextMenu.node.path
         : contextMenu.node?.path.split('/').slice(0, -1).join('/') || ''
       const path = basePath ? `${basePath}/${name}` : name
-      await createDirectoryMut.mutateAsync({ path })
+      try {
+        await createDirectoryMut.mutateAsync({ path })
+      } catch (err) {
+        console.error('Failed to create directory:', err)
+      }
     }
     closeContextMenu()
   }
@@ -67,13 +71,17 @@ export function FileTree() {
     )
 
     if (confirmed) {
-      await deleteFileMut.mutateAsync({ path: contextMenu.node.path })
+      try {
+        await deleteFileMut.mutateAsync({ path: contextMenu.node.path })
+      } catch (err) {
+        console.error('Failed to delete file:', err)
+      }
     }
     closeContextMenu()
   }
 
   const refreshTree = async () => {
-    await qc.invalidateQueries({ queryKey: ['gitops', 'file-tree'] })
+    await qc.invalidateQueries({ queryKey: FILE_TREE_KEYS })
   }
 
   // Close context menu when clicking elsewhere

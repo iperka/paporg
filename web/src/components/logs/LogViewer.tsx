@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSse } from '@/contexts/SseContext'
+import { useLogs } from '@/contexts/LogStreamContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -20,7 +20,7 @@ import {
 import type { LogEvent } from '@/types/config'
 
 export function LogViewer() {
-  const { logs, isConnected, error, clearLogs } = useSse()
+  const { logs, isConnected, error, clearLogs } = useLogs()
   const [isPaused, setIsPaused] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [levelFilter, setLevelFilter] = useState<string[]>([])

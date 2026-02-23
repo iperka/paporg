@@ -7,6 +7,6 @@ export function useFileTree(): { data: FileTreeNode | null; isLoading: boolean }
   const items = result.data ?? []
   return {
     data: items.length > 0 ? (items[0] as FileTreeNode) : null,
-    isLoading: items.length === 0,
+    isLoading: result.isLoading,
   }
 }

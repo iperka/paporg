@@ -16,8 +16,13 @@ export const settingsCollection = createCollection(
       const resources = await api.gitops.listResources('Settings')
       if (resources.length === 0) return []
       const resource = await api.gitops.getResource('Settings', resources[0].name)
-      const parsed = yaml.load(resource.yaml) as SettingsResource
-      return [{ id: 'settings', ...parsed } as SettingsItem]
+      try {
+        const parsed = yaml.load(resource.yaml) as SettingsResource | undefined
+        if (!parsed) return []
+        return [{ id: 'settings', ...parsed } as SettingsItem]
+      } catch {
+        return []
+      }
     },
     queryClient,
     getKey: (item: SettingsItem) => item.id,

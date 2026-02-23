@@ -31,13 +31,19 @@ export function zodFormValidator<TFormData>(schema: z.ZodType<TFormData>) {
     if (result.success) return undefined
 
     const fields: Record<string, string> = {}
+    const formErrors: string[] = []
     for (const issue of result.error.issues) {
       const path = issue.path.join('.')
-      if (path && !fields[path]) {
+      if (!path) {
+        formErrors.push(issue.message)
+      } else if (!fields[path]) {
         fields[path] = issue.message
       }
     }
 
+    if (formErrors.length > 0) {
+      return { fields, form: formErrors.join('; ') }
+    }
     return { fields }
   }
 }

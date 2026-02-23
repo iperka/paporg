@@ -181,7 +181,11 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       ? undefined
       : Array.from(selectedFiles)
 
-    await gitCommitMut.mutateAsync({ message, files })
+    try {
+      await gitCommitMut.mutateAsync({ message, files })
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   if (!open) return null

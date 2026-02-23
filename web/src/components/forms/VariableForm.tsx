@@ -36,7 +36,7 @@ export function VariableForm({
           description="Regex pattern to extract value from document text. Use named groups like (?P<value>...)"
           error={field.state.meta.errors?.[0]}
           required
-          placeholder="(?P<value>\w+)"
+          placeholder={"(?P<value>\\w+)"}
         />
       )} />
 

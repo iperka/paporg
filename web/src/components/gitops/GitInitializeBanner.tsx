@@ -23,7 +23,7 @@ export function GitInitializeBanner({ onConflicts }: GitInitializeBannerProps) {
   const isLoading = settingsLoading || gitStatusLoading
 
   // Replicate the needsInitialization logic from GitOpsContext
-  const initialLoadComplete = fileTree !== null || gitStatus !== null
+  const initialLoadComplete = fileTree !== null && gitStatus !== null
   const needsInitialization = Boolean(
     initialLoadComplete &&
     settings?.spec.git.enabled &&
