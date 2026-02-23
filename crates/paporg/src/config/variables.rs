@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, Timelike, Utc};
 use regex::Regex;
 
 use crate::config::schema::{ExtractedVariable, VariableTransform};
@@ -94,6 +94,9 @@ impl VariableEngine {
         vars.insert("l".to_string(), format!("{:04}", now.year() - 1));
         vars.insert("m".to_string(), format!("{:02}", now.month()));
         vars.insert("d".to_string(), format!("{:02}", now.day()));
+        vars.insert("h".to_string(), format!("{:02}", now.hour()));
+        vars.insert("i".to_string(), format!("{:02}", now.minute()));
+        vars.insert("s".to_string(), format!("{:02}", now.second()));
         vars.insert("timestamp".to_string(), now.timestamp().to_string());
         vars.insert("uuid".to_string(), uuid::Uuid::new_v4().to_string());
 
@@ -427,6 +430,48 @@ mod tests {
         let vars_jan1 = engine.get_builtin_variables("test.pdf", &jan1);
         assert_eq!(vars_jan1.get("y"), Some(&"2026".to_string()));
         assert_eq!(vars_jan1.get("l"), Some(&"2025".to_string()));
+    }
+
+    #[test]
+    fn test_substitute_time_variables() {
+        let engine = VariableEngine::new(&[]);
+        let extracted = HashMap::new();
+
+        let result = engine.substitute("$h/$i/$s", "test.pdf", &extracted);
+
+        // Should be substituted (not left as literal $h/$i/$s)
+        assert!(!result.contains("$h"));
+        assert!(!result.contains("$i"));
+        assert!(!result.contains("$s"));
+
+        // Each segment should be a 2-digit number separated by underscores (sanitized from '/')
+        for part in result.split('_') {
+            assert_eq!(
+                part.len(),
+                2,
+                "time component '{}' should be 2 digits",
+                part
+            );
+            assert!(
+                part.chars().all(|c| c.is_ascii_digit()),
+                "time component '{}' should be numeric",
+                part
+            );
+        }
+    }
+
+    #[test]
+    fn test_time_variables_exact_values() {
+        use chrono::TimeZone;
+
+        let engine = VariableEngine::new(&[]);
+        // 2024-03-15 09:05:07 UTC
+        let now = Utc.with_ymd_and_hms(2024, 3, 15, 9, 5, 7).unwrap();
+        let vars = engine.get_builtin_variables("test.pdf", &now);
+
+        assert_eq!(vars.get("h"), Some(&"09".to_string()));
+        assert_eq!(vars.get("i"), Some(&"05".to_string()));
+        assert_eq!(vars.get("s"), Some(&"07".to_string()));
     }
 
     #[test]

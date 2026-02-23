@@ -359,6 +359,39 @@ fn test_builtin_variables() {
     assert!(day_result.chars().all(|c| c.is_ascii_digit()));
     assert_eq!(day_result.len(), 2, "Day should be 2 digits");
 
+    // Test hour
+    let hour_result = engine.substitute("$h", "test.pdf", &extracted);
+    assert!(
+        hour_result.chars().all(|c| c.is_ascii_digit()),
+        "Hour should be numeric: {}",
+        hour_result
+    );
+    assert_eq!(hour_result.len(), 2, "Hour should be 2 digits");
+    let hour_val: u32 = hour_result.parse().unwrap();
+    assert!(hour_val <= 23, "Hour should be 0-23, got {}", hour_val);
+
+    // Test minute
+    let minute_result = engine.substitute("$i", "test.pdf", &extracted);
+    assert!(
+        minute_result.chars().all(|c| c.is_ascii_digit()),
+        "Minute should be numeric: {}",
+        minute_result
+    );
+    assert_eq!(minute_result.len(), 2, "Minute should be 2 digits");
+    let minute_val: u32 = minute_result.parse().unwrap();
+    assert!(minute_val <= 59, "Minute should be 0-59, got {}", minute_val);
+
+    // Test second
+    let second_result = engine.substitute("$s", "test.pdf", &extracted);
+    assert!(
+        second_result.chars().all(|c| c.is_ascii_digit()),
+        "Second should be numeric: {}",
+        second_result
+    );
+    assert_eq!(second_result.len(), 2, "Second should be 2 digits");
+    let second_val: u32 = second_result.parse().unwrap();
+    assert!(second_val <= 59, "Second should be 0-59, got {}", second_val);
+
     // Test timestamp
     let timestamp_result = engine.substitute("$timestamp", "test.pdf", &extracted);
     assert!(timestamp_result.chars().all(|c| c.is_ascii_digit()));
@@ -371,6 +404,26 @@ fn test_builtin_variables() {
     let uuid_result = engine.substitute("$uuid", "test.pdf", &extracted);
     // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with hyphens)
     assert!(uuid_result.len() >= 32, "UUID should be at least 32 chars");
+}
+
+/// Test time variables are substituted in templates.
+#[test]
+fn test_time_variables_in_template() {
+    let engine = VariableEngine::new(&[]);
+    let extracted = HashMap::new();
+
+    let result = engine.substitute("$y-$m-$d_$h-$i-$s", "scan.pdf", &extracted);
+
+    // None of the variable placeholders should remain
+    assert!(!result.contains("$y"), "Expected $y to be substituted: {}", result);
+    assert!(!result.contains("$m"), "Expected $m to be substituted: {}", result);
+    assert!(!result.contains("$d"), "Expected $d to be substituted: {}", result);
+    assert!(!result.contains("$h"), "Expected $h to be substituted: {}", result);
+    assert!(!result.contains("$i"), "Expected $i to be substituted: {}", result);
+    assert!(!result.contains("$s"), "Expected $s to be substituted: {}", result);
+
+    // Result should look like a datetime string: YYYY-MM-DD_HH-MM-SS
+    assert_eq!(result.len(), 19, "Expected YYYY-MM-DD_HH-MM-SS format (19 chars), got '{}' ({})", result, result.len());
 }
 
 /// Test UUID uniqueness.
