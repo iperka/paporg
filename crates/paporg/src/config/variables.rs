@@ -91,6 +91,7 @@ impl VariableEngine {
         let mut vars = HashMap::new();
 
         vars.insert("y".to_string(), format!("{:04}", now.year()));
+        vars.insert("l".to_string(), format!("{:04}", now.year() - 1));
         vars.insert("m".to_string(), format!("{:02}", now.month()));
         vars.insert("d".to_string(), format!("{:02}", now.day()));
         vars.insert("timestamp".to_string(), now.timestamp().to_string());
@@ -389,6 +390,43 @@ mod tests {
     #[test]
     fn test_sanitize_only_underscores() {
         assert_eq!(sanitize_filename("___"), "");
+    }
+
+    #[test]
+    fn test_substitute_last_year_variable() {
+        let engine = VariableEngine::new(&[]);
+        let extracted = HashMap::new();
+
+        let result = engine.substitute("$l", "test.pdf", &extracted);
+
+        // Should be substituted (not left as literal $l)
+        assert!(!result.contains("$l"));
+        // Should be a 4-digit numeric year
+        assert_eq!(result.len(), 4, "Last year should be 4 digits");
+        assert!(
+            result.chars().all(|c| c.is_ascii_digit()),
+            "Last year should be numeric: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_last_year_exact_values() {
+        use chrono::TimeZone;
+
+        let engine = VariableEngine::new(&[]);
+
+        // Mid-year: 2026-06-15
+        let now = Utc.with_ymd_and_hms(2026, 6, 15, 12, 0, 0).unwrap();
+        let vars = engine.get_builtin_variables("test.pdf", &now);
+        assert_eq!(vars.get("y"), Some(&"2026".to_string()));
+        assert_eq!(vars.get("l"), Some(&"2025".to_string()));
+
+        // Edge case: January 1st — $l should still be previous year
+        let jan1 = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let vars_jan1 = engine.get_builtin_variables("test.pdf", &jan1);
+        assert_eq!(vars_jan1.get("y"), Some(&"2026".to_string()));
+        assert_eq!(vars_jan1.get("l"), Some(&"2025".to_string()));
     }
 
     #[test]

@@ -114,7 +114,7 @@ export function RuleForm({
                 label="Output Directory"
                 value={field.state.value}
                 onChange={field.handleChange}
-                description="Output directory template. Variables: $y (year), $m (month), $category, custom variables"
+                description="Output directory template. Variables: $y (year), $l (last year), $m (month), $category, custom variables"
                 error={field.state.meta.errors?.[0]}
                 required
                 mono

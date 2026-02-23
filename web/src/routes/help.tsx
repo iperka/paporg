@@ -70,11 +70,13 @@ export function HelpPage() {
   const builtInVariables = useMemo(() => {
     const now = new Date()
     const currentYear = now.getFullYear().toString()
+    const lastYear = (now.getFullYear() - 1).toString()
     const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
     const currentDay = String(now.getDate()).padStart(2, '0')
 
     return [
       { name: '$y', description: 'Current year (4 digits)', example: currentYear },
+      { name: '$l', description: 'Last year (4 digits)', example: lastYear },
       { name: '$m', description: 'Current month (2 digits)', example: currentMonth },
       { name: '$d', description: 'Current day (2 digits)', example: currentDay },
       ...staticBuiltInVariables,
