@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -33,8 +34,25 @@ export function MatchConditionBuilder({
 }: MatchConditionBuilderProps) {
   const type = getMatchConditionType(condition)
 
+  const caseSensitive = 'caseSensitive' in condition ? condition.caseSensitive : undefined
+
   const handleTypeChange = (newType: MatchConditionType) => {
-    onChange(createMatchConditionOfType(newType))
+    const newCondition = createMatchConditionOfType(newType)
+    // Preserve caseSensitive when switching types
+    if (caseSensitive !== undefined) {
+      ;(newCondition as Record<string, unknown>).caseSensitive = caseSensitive
+    }
+    onChange(newCondition as MatchCondition)
+  }
+
+  const handleCaseSensitiveChange = (checked: boolean) => {
+    const updated = { ...condition }
+    if (checked) {
+      ;(updated as Record<string, unknown>).caseSensitive = true
+    } else {
+      delete (updated as Record<string, unknown>).caseSensitive
+    }
+    onChange(updated as MatchCondition)
   }
 
   const renderSimpleCondition = () => {
@@ -165,6 +183,17 @@ export function MatchConditionBuilder({
             </SelectItem>
           </SelectContent>
         </Select>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <Label htmlFor={`case-sensitive-${depth}`} className="text-xs text-muted-foreground cursor-pointer">
+            Case Sensitive
+          </Label>
+          <Switch
+            id={`case-sensitive-${depth}`}
+            checked={caseSensitive === true}
+            onCheckedChange={handleCaseSensitiveChange}
+          />
+        </div>
 
         {depth > 0 && (
           <Badge variant="outline" className="text-xs">

@@ -168,6 +168,7 @@ impl RuleBuilder {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: category.to_string(),
             output: OutputConfig {
@@ -200,6 +201,7 @@ impl RuleBuilder {
             contains_any: None,
             contains_all: None,
             pattern: None,
+            case_sensitive: None,
         });
         self
     }
@@ -214,6 +216,7 @@ impl RuleBuilder {
             contains_any: Some(texts.into_iter().map(|s| s.to_string()).collect()),
             contains_all: None,
             pattern: None,
+            case_sensitive: None,
         });
         self
     }
@@ -228,6 +231,7 @@ impl RuleBuilder {
             contains_any: None,
             contains_all: Some(texts.into_iter().map(|s| s.to_string()).collect()),
             pattern: None,
+            case_sensitive: None,
         });
         self
     }
@@ -242,7 +246,17 @@ impl RuleBuilder {
             contains_any: None,
             contains_all: None,
             pattern: Some(pattern.to_string()),
+            case_sensitive: None,
         });
+        self
+    }
+
+    /// Set case sensitivity on the current match condition.
+    /// Only applies to Simple match conditions.
+    pub fn case_sensitive(mut self, sensitive: bool) -> Self {
+        if let MatchCondition::Simple(ref mut simple) = self.match_condition {
+            simple.case_sensitive = Some(sensitive);
+        }
         self
     }
 
@@ -370,6 +384,7 @@ pub fn match_all(conditions: Vec<MatchCondition>) -> MatchCondition {
         all: Some(conditions),
         any: None,
         not: None,
+        case_sensitive: None,
     })
 }
 
@@ -379,6 +394,7 @@ pub fn match_any(conditions: Vec<MatchCondition>) -> MatchCondition {
         all: None,
         any: Some(conditions),
         not: None,
+        case_sensitive: None,
     })
 }
 
@@ -388,6 +404,7 @@ pub fn match_not(condition: MatchCondition) -> MatchCondition {
         all: None,
         any: None,
         not: Some(Box::new(condition)),
+        case_sensitive: None,
     })
 }
 
@@ -398,6 +415,7 @@ pub fn simple_contains(text: &str) -> MatchCondition {
         contains_any: None,
         contains_all: None,
         pattern: None,
+        case_sensitive: None,
     })
 }
 
@@ -408,6 +426,7 @@ pub fn simple_contains_any(texts: Vec<&str>) -> MatchCondition {
         contains_any: Some(texts.into_iter().map(|s| s.to_string()).collect()),
         contains_all: None,
         pattern: None,
+        case_sensitive: None,
     })
 }
 
@@ -418,6 +437,7 @@ pub fn simple_contains_all(texts: Vec<&str>) -> MatchCondition {
         contains_any: None,
         contains_all: Some(texts.into_iter().map(|s| s.to_string()).collect()),
         pattern: None,
+        case_sensitive: None,
     })
 }
 
@@ -428,6 +448,7 @@ pub fn simple_pattern(pattern: &str) -> MatchCondition {
         contains_any: None,
         contains_all: None,
         pattern: Some(pattern.to_string()),
+        case_sensitive: None,
     })
 }
 

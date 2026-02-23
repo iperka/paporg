@@ -46,13 +46,14 @@ const staticBuiltInVariables = [
 ]
 
 const matchConditionTypes = [
-  { type: 'contains', description: 'Document contains exact text', example: 'contains: "Invoice"' },
-  { type: 'containsAny', description: 'Contains any of the specified texts', example: 'containsAny: ["Invoice", "Bill"]' },
-  { type: 'containsAll', description: 'Contains all of the specified texts', example: 'containsAll: ["Invoice", "VAT"]' },
-  { type: 'pattern', description: 'Matches a regex pattern', example: 'pattern: "INV-\\d+"' },
+  { type: 'contains', description: 'Document contains text (case-insensitive by default)', example: 'contains: "Invoice"' },
+  { type: 'containsAny', description: 'Contains any of the specified texts (case-insensitive by default)', example: 'containsAny: ["Invoice", "Bill"]' },
+  { type: 'containsAll', description: 'Contains all of the specified texts (case-insensitive by default)', example: 'containsAll: ["Invoice", "VAT"]' },
+  { type: 'pattern', description: 'Matches a regex pattern (case-insensitive by default)', example: 'pattern: "INV-\\d+"' },
   { type: 'all', description: 'All conditions must match (AND)', example: 'all: [{...}, {...}]' },
   { type: 'any', description: 'Any condition can match (OR)', example: 'any: [{...}, {...}]' },
   { type: 'not', description: 'Condition must NOT match', example: 'not: {contains: "Draft"}' },
+  { type: 'caseSensitive', description: 'Optional boolean to enable case-sensitive matching (default: false)', example: 'caseSensitive: true' },
 ]
 
 const transforms = [

@@ -139,6 +139,8 @@ pub struct CompoundMatch {
     pub any: Option<Vec<MatchCondition>>,
     #[serde(default)]
     pub not: Option<Box<MatchCondition>>,
+    #[serde(rename = "caseSensitive", default)]
+    pub case_sensitive: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +153,8 @@ pub struct SimpleMatch {
     pub contains_all: Option<Vec<String>>,
     #[serde(default)]
     pub pattern: Option<String>,
+    #[serde(rename = "caseSensitive", default)]
+    pub case_sensitive: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

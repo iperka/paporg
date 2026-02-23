@@ -149,6 +149,9 @@
                 "$ref": "#/$defs/matchCondition"
               },
               "minItems": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["all"]
@@ -162,6 +165,9 @@
                 "$ref": "#/$defs/matchCondition"
               },
               "minItems": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["any"]
@@ -171,6 +177,9 @@
           "properties": {
             "not": {
               "$ref": "#/$defs/matchCondition"
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["not"]
@@ -181,6 +190,9 @@
             "contains": {
               "type": "string",
               "minLength": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["contains"]
@@ -194,6 +206,9 @@
                 "type": "string"
               },
               "minItems": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["containsAny"]
@@ -207,6 +222,9 @@
                 "type": "string"
               },
               "minItems": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["containsAll"]
@@ -217,6 +235,9 @@
             "pattern": {
               "type": "string",
               "minLength": 1
+            },
+            "caseSensitive": {
+              "type": "boolean"
             }
           },
           "required": ["pattern"]

@@ -147,6 +147,7 @@ fn convert_match_condition(cond: &MatchCondition) -> LegacyMatchCondition {
             contains_any: s.contains_any.clone(),
             contains_all: s.contains_all.clone(),
             pattern: s.pattern.clone(),
+            case_sensitive: s.case_sensitive,
         }),
         MatchCondition::Compound(c) => LegacyMatchCondition::Compound(LegacyCompoundMatch {
             all: c
@@ -158,6 +159,7 @@ fn convert_match_condition(cond: &MatchCondition) -> LegacyMatchCondition {
                 .as_ref()
                 .map(|v| v.iter().map(convert_match_condition).collect()),
             not: c.not.as_ref().map(|n| Box::new(convert_match_condition(n))),
+            case_sensitive: c.case_sensitive,
         }),
     }
 }

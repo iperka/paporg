@@ -473,6 +473,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "invoices".to_string(),
             output: OutputConfig {
@@ -508,6 +509,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "invoices".to_string(),
             output: OutputConfig {
@@ -674,6 +676,7 @@ mod tests {
                     contains_any: None,
                     contains_all: None,
                     pattern: None,
+                    case_sensitive: None,
                 }),
                 category: "low-priority".to_string(),
                 output: OutputConfig {
@@ -691,6 +694,7 @@ mod tests {
                     contains_any: None,
                     contains_all: None,
                     pattern: None,
+                    case_sensitive: None,
                 }),
                 category: "high-priority".to_string(),
                 output: OutputConfig {
@@ -728,6 +732,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "specific".to_string(),
             output: OutputConfig {
@@ -766,6 +771,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "evil".to_string(),
             output: OutputConfig {
@@ -799,6 +805,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "abs".to_string(),
             output: OutputConfig {
@@ -832,6 +839,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "slash".to_string(),
             output: OutputConfig {
@@ -866,6 +874,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "empty".to_string(),
             output: OutputConfig {
@@ -949,6 +958,7 @@ mod tests {
                 contains_any: None,
                 contains_all: None,
                 pattern: None,
+                case_sensitive: None,
             }),
             category: "invoices".to_string(),
             output: OutputConfig {
