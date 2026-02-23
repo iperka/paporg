@@ -1,46 +1,48 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useGitOps } from '@/contexts/GitOpsContext'
-import { FileText, Plus, FolderPlus } from 'lucide-react'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useCreateDirectory } from '@/mutations/use-gitops-mutations'
+import { FileText, Plus, FolderPlus, Loader2 } from 'lucide-react'
 import { FolderTreeView } from '@/components/organization/FolderTreeView'
 import { CreateFolderDialog } from '@/components/organization/CreateFolderDialog'
 import { useToast } from '@/components/ui/use-toast'
+import type { FileTreeNode } from '@/types/gitops'
 
 export function RulesPage() {
-  const { fileTree, createDirectory } = useGitOps()
+  const { data: fileTree, isLoading: isTreeLoading } = useFileTree()
+  const createDirectoryMut = useCreateDirectory()
   const { toast } = useToast()
   const [showFolderDialog, setShowFolderDialog] = useState(false)
 
   // Extract rules from file tree
-  const getRules = (): { name: string; path: string }[] => {
-    const rules: { name: string; path: string }[] = []
+  const rules = useMemo(() => {
+    if (isTreeLoading || !fileTree) return []
+    const items: { name: string; path: string }[] = []
 
-    const traverse = (node: typeof fileTree) => {
+    const traverse = (node: FileTreeNode | null) => {
       if (!node) return
       if (node.resource?.kind === 'Rule') {
-        rules.push({ name: node.resource.name, path: node.path })
+        items.push({ name: node.resource.name, path: node.path })
       }
       node.children.forEach(traverse)
     }
 
     traverse(fileTree)
-    return rules.sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  const rules = getRules()
+    return items.sort((a, b) => a.name.localeCompare(b.name))
+  }, [fileTree, isTreeLoading])
 
   const handleCreateFolder = async (name: string) => {
     const path = `rules/${name}`
-    const success = await createDirectory(path)
-    if (success) {
+    try {
+      await createDirectoryMut.mutateAsync({ path })
       toast({
         title: 'Folder created',
         description: `Created folder "${name}"`,
       })
-    } else {
-      throw new Error('Failed to create folder')
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Failed to create folder')
     }
   }
 
@@ -70,7 +72,11 @@ export function RulesPage() {
         </div>
       </div>
 
-      {rules.length === 0 ? (
+      {isTreeLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : rules.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FileText className="h-12 w-12 text-muted-foreground mb-4" />

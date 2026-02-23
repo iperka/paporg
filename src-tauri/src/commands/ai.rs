@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "ai")]
 use paporg::ai::ModelManager;
-use paporg::ai::{RuleSuggester, RuleSuggestion};
+use paporg::ai::{CommitContext, RuleSuggester, RuleSuggestion};
 use serde::Serialize;
 use tauri::State;
 use tokio::sync::RwLock;
@@ -213,4 +213,76 @@ pub async fn suggest_rule(
             Err(e) => Ok(ApiResponse::err(e.to_string())),
         }
     }
+}
+
+/// Generate a commit message from changed files and diff.
+#[tauri::command]
+pub async fn suggest_commit_message(
+    _state: State<'_, Arc<RwLock<TauriAppState>>>,
+    files: Vec<(String, String)>,
+    diff: String,
+) -> Result<ApiResponse<String>, String> {
+    #[cfg(feature = "ai")]
+    {
+        use paporg::ai::SuggesterPool;
+
+        let context = CommitContext { files, diff };
+
+        // Try to use the LLM-backed suggester if a model is available
+        match ModelManager::new() {
+            Ok(manager) if manager.is_model_available() => {
+                let pool = SuggesterPool::new();
+                if let Err(e) = pool.get_or_create(&manager.model_path()) {
+                    log::warn!("Failed to init suggester, falling back: {}", e);
+                    return Ok(ApiResponse::ok(generate_fallback_commit_message(&context)));
+                }
+                match pool.generate_commit_message(&context) {
+                    Ok(msg) => Ok(ApiResponse::ok(msg)),
+                    Err(e) => {
+                        log::warn!("AI commit suggestion failed, falling back: {}", e);
+                        Ok(ApiResponse::ok(generate_fallback_commit_message(&context)))
+                    }
+                }
+            }
+            _ => Ok(ApiResponse::ok(generate_fallback_commit_message(&context))),
+        }
+    }
+
+    #[cfg(not(feature = "ai"))]
+    {
+        let context = CommitContext { files, diff };
+        let suggester =
+            RuleSuggester::new(&std::path::PathBuf::new()).map_err(|e| e.to_string())?;
+        match suggester.generate_commit_message(&context) {
+            Ok(msg) => Ok(ApiResponse::ok(msg)),
+            Err(e) => Ok(ApiResponse::err(e.to_string())),
+        }
+    }
+}
+
+/// Fallback commit message generation without AI.
+#[cfg(feature = "ai")]
+fn generate_fallback_commit_message(context: &CommitContext) -> String {
+    let has_new = context.files.iter().any(|(s, _)| s == "A" || s == "?");
+    let has_deleted = context.files.iter().any(|(s, _)| s == "D");
+    let commit_type = if has_new && !has_deleted {
+        "feat"
+    } else {
+        "chore"
+    };
+
+    let filenames: Vec<&str> = context
+        .files
+        .iter()
+        .map(|(_, path)| path.rsplit('/').next().unwrap_or(path.as_str()))
+        .collect();
+
+    let desc = if filenames.len() <= 3 {
+        filenames.join(", ")
+    } else {
+        let first_three = filenames[..3].join(", ");
+        format!("{} and {} more", first_three, filenames.len() - 3)
+    };
+
+    format!("{}: update {}", commit_type, desc)
 }

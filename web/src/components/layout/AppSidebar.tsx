@@ -1,7 +1,7 @@
 import { Link, useLocation } from '@tanstack/react-router'
 import { Briefcase, FileText, FolderInput, GitBranch, HelpCircle, LayoutDashboard, ScrollText, Settings, Variable, AlertTriangle } from 'lucide-react'
 import { ModeToggle } from '@/components/mode-toggle'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useGitStatus } from '@/queries/use-git-status'
 import { Badge } from '@/components/ui/badge'
 import {
   Sidebar,
@@ -19,7 +19,7 @@ import {
 
 export function AppSidebar() {
   const location = useLocation()
-  const { gitStatus } = useGitOps()
+  const { data: gitStatus } = useGitStatus()
 
   // Use boundary-aware matching to prevent partial path matches (e.g., /jobs matching /jobs-other)
   const isActive = (path: string) => {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { GitCommit, Loader2, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { GitCommit, Loader2, Check, X, ChevronDown, ChevronRight, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useGitCommit } from '@/mutations/use-gitops-mutations'
 import { useGitProgressContext } from '@/contexts/GitProgressContext'
 import { getPhaseLabel } from '@/types/gitops'
 import { cn } from '@/lib/utils'
@@ -15,13 +16,15 @@ interface CommitDialogProps {
 }
 
 export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
-  const { gitStatus, gitCommit, isLoading, error: contextError } = useGitOps()
+  const { data: gitStatus } = useGitStatus()
+  const gitCommitMut = useGitCommit()
   const { activeOperations } = useGitProgressContext()
 
   const [message, setMessage] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [currentOperationId, setCurrentOperationId] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [isGenerating, setIsGenerating] = useState(false)
   const [diffFile, setDiffFile] = useState<string | null>(null)
   const [diffContent, setDiffContent] = useState<string | null>(null)
   const [isDiffLoading, setIsDiffLoading] = useState(false)
@@ -48,8 +51,8 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
   const isFailed = currentProgress?.phase === 'failed'
   const isInProgress = Boolean(currentProgress && !isCompleted && !isFailed)
 
-  // Combine local validation errors with context errors
-  const error = localError || contextError || (isFailed ? currentProgress?.error : null)
+  // Combine local validation errors with progress errors
+  const error = localError || (isFailed ? currentProgress?.error : null)
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -59,15 +62,24 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       setCurrentOperationId(null)
       setDiffFile(null)
       setDiffContent(null)
+      setIsGenerating(false)
+      setIsDiffLoading(false)
       // Select all files by default
       setSelectedFiles(new Set(allFiles.map((f) => f.path)))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  // Re-sync selected files when allFiles loads after dialog opens
+  useEffect(() => {
+    if (open && allFiles.length > 0 && selectedFiles.size === 0) {
+      setSelectedFiles(new Set(allFiles.map((f) => f.path)))
+    }
+  }, [open, allFiles, selectedFiles.size])
+
   // Watch for new commit operations starting
   useEffect(() => {
-    if (isLoading && !currentOperationId) {
+    if (gitCommitMut.isPending && !currentOperationId) {
       for (const [id, op] of activeOperations) {
         if (op.operationType === 'commit' && !currentOperationId) {
           setCurrentOperationId(id)
@@ -75,7 +87,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
         }
       }
     }
-  }, [isLoading, activeOperations, currentOperationId])
+  }, [gitCommitMut.isPending, activeOperations, currentOperationId])
 
   // Auto-close on success after a delay
   useEffect(() => {
@@ -125,6 +137,38 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
     }
   }, [diffFile])
 
+  const handleGenerate = useCallback(async () => {
+    if (selectedFiles.size === 0) return
+    setIsGenerating(true)
+    setLocalError(null)
+    try {
+      // Build files array from selected files
+      const files: [string, string][] = allFiles
+        .filter((f) => selectedFiles.has(f.path))
+        .map((f) => [f.type, f.path])
+
+      // Fetch diffs for the first 5 selected files
+      const filesToDiff = files.slice(0, 5)
+      const diffs = await Promise.all(
+        filesToDiff.map(async ([, path]) => {
+          try {
+            return await api.git.diff(path)
+          } catch {
+            return ''
+          }
+        })
+      )
+      const combinedDiff = diffs.filter(Boolean).join('\n')
+
+      const msg = await api.ai.suggestCommitMessage(files, combinedDiff)
+      setMessage(msg)
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : 'Failed to generate commit message')
+    } finally {
+      setIsGenerating(false)
+    }
+  }, [selectedFiles, allFiles])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -146,7 +190,11 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       ? undefined
       : Array.from(selectedFiles)
 
-    await gitCommit(message, files)
+    try {
+      await gitCommitMut.mutateAsync({ message, files })
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   if (!open) return null
@@ -295,18 +343,34 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="message">Commit Message</Label>
-            <Input
-              id="message"
-              value={message}
-              onChange={(e) => {
-                setMessage(e.target.value)
-                setLocalError(null)
-              }}
-              placeholder="Describe your changes..."
-              className={error && !currentProgress ? 'border-destructive' : ''}
-              autoFocus
-              disabled={isInProgress}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="message"
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value)
+                  setLocalError(null)
+                }}
+                placeholder="Describe your changes..."
+                className={cn('flex-1', error && !currentProgress ? 'border-destructive' : '')}
+                autoFocus
+                disabled={isInProgress}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={handleGenerate}
+                disabled={isInProgress || isGenerating || selectedFiles.size === 0}
+                title="Generate commit message"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
             {error && !currentProgress && <p className="text-sm text-destructive">{error}</p>}
           </div>
 
@@ -320,7 +384,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
               {isCompleted ? 'Close' : 'Cancel'}
             </Button>
             {!isCompleted && (
-              <Button type="submit" disabled={isLoading || isInProgress || !message.trim() || selectedFiles.size === 0}>
+              <Button type="submit" disabled={gitCommitMut.isPending || isInProgress || isGenerating || !message.trim() || selectedFiles.size === 0}>
                 {isInProgress ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

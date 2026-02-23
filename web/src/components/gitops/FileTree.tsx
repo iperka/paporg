@@ -4,7 +4,10 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { FileTreeItem } from './FileTreeItem'
 import { CreateResourceDialog } from './CreateResourceDialog'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useSelectedFile } from '@/contexts/SelectedFileContext'
+import { useCreateDirectory, useDeleteFile, FILE_TREE_KEYS } from '@/mutations/use-gitops-mutations'
+import { useQueryClient } from '@tanstack/react-query'
 import type { FileTreeNode, ResourceKind } from '@/types/gitops'
 
 interface ContextMenuState {
@@ -14,15 +17,13 @@ interface ContextMenuState {
 }
 
 export function FileTree() {
-  const {
-    fileTree,
-    selectedPath,
-    selectFile,
-    refreshTree,
-    createDirectory,
-    deleteFile,
-    isLoading,
-  } = useGitOps()
+  const { data: fileTree, isLoading: isTreeLoading } = useFileTree()
+  const { selectedPath, selectFile } = useSelectedFile()
+  const createDirectoryMut = useCreateDirectory()
+  const deleteFileMut = useDeleteFile()
+  const qc = useQueryClient()
+
+  const isLoading = isTreeLoading || createDirectoryMut.isPending || deleteFileMut.isPending
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ x: 0, y: 0, node: null })
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -51,7 +52,11 @@ export function FileTree() {
         ? contextMenu.node.path
         : contextMenu.node?.path.split('/').slice(0, -1).join('/') || ''
       const path = basePath ? `${basePath}/${name}` : name
-      await createDirectory(path)
+      try {
+        await createDirectoryMut.mutateAsync({ path })
+      } catch (err) {
+        console.error('Failed to create directory:', err)
+      }
     }
     closeContextMenu()
   }
@@ -66,9 +71,17 @@ export function FileTree() {
     )
 
     if (confirmed) {
-      await deleteFile(contextMenu.node.path)
+      try {
+        await deleteFileMut.mutateAsync({ path: contextMenu.node.path })
+      } catch (err) {
+        console.error('Failed to delete file:', err)
+      }
     }
     closeContextMenu()
+  }
+
+  const refreshTree = async () => {
+    await qc.invalidateQueries({ queryKey: FILE_TREE_KEYS })
   }
 
   // Close context menu when clicking elsewhere

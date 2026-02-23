@@ -1,0 +1,5 @@
+export { fileTreeCollection } from './file-tree'
+export { gitStatusCollection } from './git-status'
+export { branchesCollection } from './branches'
+export { settingsCollection } from './settings'
+export { resourcesCollection } from './resources'

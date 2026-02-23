@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { Save, RotateCcw, Trash2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useSelectedFile } from '@/contexts/SelectedFileContext'
+import { useUpdateResource, useDeleteResource } from '@/mutations/use-gitops-mutations'
 import type { ResourceKind } from '@/types/gitops'
 import * as yaml from 'js-yaml'
 
@@ -12,14 +13,11 @@ interface ParsedResource {
 }
 
 export function ResourceEditor() {
-  const {
-    selectedResource,
-    selectedPath,
-    updateResource,
-    deleteResource,
-    isLoading,
-    error,
-  } = useGitOps()
+  const { selectedResource, selectedPath } = useSelectedFile()
+  const updateResourceMut = useUpdateResource()
+  const deleteResourceMut = useDeleteResource()
+
+  const isLoading = updateResourceMut.isPending || deleteResourceMut.isPending
 
   const { toast } = useToast()
 
@@ -87,22 +85,21 @@ export function ResourceEditor() {
       return
     }
 
-    const success = await updateResource(resourceKind, resourceName, content)
-
-    if (success) {
+    try {
+      await updateResourceMut.mutateAsync({ kind: resourceKind, name: resourceName, yamlContent: content })
       setHasChanges(false)
       toast({
         title: 'Saved',
         description: `${resourceKind} "${resourceName}" saved successfully`,
       })
-    } else {
+    } catch (e) {
       toast({
         title: 'Error',
-        description: error || 'Failed to save resource',
+        description: e instanceof Error ? e.message : 'Failed to save resource',
         variant: 'destructive',
       })
     }
-  }, [resourceKind, resourceName, content, updateResource, error, toast])
+  }, [resourceKind, resourceName, content, updateResourceMut, toast])
 
   const handleRevert = () => {
     if (selectedResource) {
@@ -127,17 +124,16 @@ export function ResourceEditor() {
     const confirmed = confirm(`Are you sure you want to delete "${resourceName}"?`)
     if (!confirmed) return
 
-    const success = await deleteResource(resourceKind, resourceName)
-
-    if (success) {
+    try {
+      await deleteResourceMut.mutateAsync({ kind: resourceKind, name: resourceName })
       toast({
         title: 'Deleted',
         description: `${resourceKind} "${resourceName}" deleted`,
       })
-    } else {
+    } catch (e) {
       toast({
         title: 'Error',
-        description: error || 'Failed to delete resource',
+        description: e instanceof Error ? e.message : 'Failed to delete resource',
         variant: 'destructive',
       })
     }

@@ -14,9 +14,11 @@ pub mod suggester_stub;
 pub use model_manager::{ModelError, ModelManager};
 
 #[cfg(feature = "ai")]
-pub use suggester::{ExistingRule, RuleSuggester, RuleSuggestion, SuggesterError, SuggesterPool};
+pub use suggester::{
+    CommitContext, ExistingRule, RuleSuggester, RuleSuggestion, SuggesterError, SuggesterPool,
+};
 
 #[cfg(not(feature = "ai"))]
 pub use suggester_stub::{
-    ExistingRule, RuleSuggester, RuleSuggestion, SuggesterError, SuggesterPool,
+    CommitContext, ExistingRule, RuleSuggester, RuleSuggestion, SuggesterError, SuggesterPool,
 };

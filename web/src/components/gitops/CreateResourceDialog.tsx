@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useCreateResource } from '@/mutations/use-gitops-mutations'
 import { createDefaultResource, validateResourceName } from '@/types/gitops'
 import type { ResourceKind } from '@/types/gitops'
 import * as yaml from 'js-yaml'
@@ -27,7 +27,9 @@ export function CreateResourceDialog({
   defaultKind = 'Rule',
   basePath,
 }: CreateResourceDialogProps) {
-  const { createResource, isLoading } = useGitOps()
+  const createResourceMut = useCreateResource()
+
+  const isLoading = createResourceMut.isPending
 
   const [kind, setKind] = useState<ResourceKind>(defaultKind)
   const [name, setName] = useState('')
@@ -77,12 +79,11 @@ export function CreateResourceDialog({
       path = `${basePath}/${name}.yaml`
     }
 
-    const success = await createResource(kind, yamlContent, path)
-
-    if (success) {
+    try {
+      await createResourceMut.mutateAsync({ kind, yamlContent, path })
       onOpenChange(false)
-    } else {
-      setSubmitError('Failed to create resource')
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to create resource')
     }
   }
 

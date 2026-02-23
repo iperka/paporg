@@ -19,15 +19,20 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useBranches } from '@/queries/use-branches'
+import { useCheckoutBranch, useCreateBranch } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 
 export function BranchSelector() {
-  const { gitStatus, branches, checkoutBranch, createBranch, isLoading } = useGitOps()
+  const { data: gitStatus } = useGitStatus()
+  const { data: branches } = useBranches()
+  const checkoutBranchMut = useCheckoutBranch()
+  const createBranchMut = useCreateBranch()
   const { toast } = useToast()
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
-  const [isCreating, setIsCreating] = useState(false)
+  const isLoading = checkoutBranchMut.isPending || createBranchMut.isPending
 
   if (!gitStatus?.isRepo) {
     return null
@@ -38,13 +43,13 @@ export function BranchSelector() {
   const remoteBranches = branches.filter(b => b.isRemote && !localBranches.some(lb => lb.name === b.name))
 
   const handleCheckout = async (branch: string) => {
-    const success = await checkoutBranch(branch)
-    if (success) {
+    try {
+      await checkoutBranchMut.mutateAsync({ branch })
       toast({
         title: 'Branch switched',
         description: `Switched to branch: ${branch}`,
       })
-    } else {
+    } catch {
       toast({
         title: 'Switch failed',
         description: `Failed to switch to branch: ${branch}`,
@@ -56,25 +61,20 @@ export function BranchSelector() {
   const handleCreateBranch = async () => {
     if (!newBranchName.trim()) return
 
-    setIsCreating(true)
     try {
-      const success = await createBranch(newBranchName.trim())
-      if (success) {
-        toast({
-          title: 'Branch created',
-          description: `Created and switched to branch: ${newBranchName}`,
-        })
-        setNewBranchName('')
-        setIsCreateDialogOpen(false)
-      } else {
-        toast({
-          title: 'Creation failed',
-          description: `Failed to create branch: ${newBranchName}`,
-          variant: 'destructive',
-        })
-      }
-    } finally {
-      setIsCreating(false)
+      await createBranchMut.mutateAsync({ name: newBranchName.trim() })
+      toast({
+        title: 'Branch created',
+        description: `Created and switched to branch: ${newBranchName}`,
+      })
+      setNewBranchName('')
+      setIsCreateDialogOpen(false)
+    } catch {
+      toast({
+        title: 'Creation failed',
+        description: `Failed to create branch: ${newBranchName}`,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -161,8 +161,8 @@ export function BranchSelector() {
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateBranch} disabled={!newBranchName.trim() || isCreating}>
-              {isCreating ? 'Creating...' : 'Create'}
+            <Button onClick={handleCreateBranch} disabled={!newBranchName.trim() || createBranchMut.isPending}>
+              {createBranchMut.isPending ? 'Creating...' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>

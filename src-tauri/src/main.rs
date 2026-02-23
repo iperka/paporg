@@ -305,6 +305,7 @@ fn main() {
             commands::ai_status,
             commands::download_ai_model,
             commands::suggest_rule,
+            commands::suggest_commit_message,
             // Analytics commands
             commands::track_event,
             // File commands

@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { GitBranch, RefreshCw, Check, AlertCircle, Loader2, CloudOff, ExternalLink, FolderDown, Plus, ArrowRight, CheckCircle2, FileEdit, FilePlus, FileX, GitCommitHorizontal, ChevronRight, ChevronDown, Folder, FolderOpen, Settings, FileText, Variable, FolderInput, History } from 'lucide-react'
-import { useGitOps } from '@/contexts/GitOpsContext'
 import { useGitProgressContext } from '@/contexts/GitProgressContext'
 import { useToast } from '@/components/ui/use-toast'
 import { Button } from '@/components/ui/button'
@@ -21,6 +20,11 @@ import {
 } from '@/schemas/resources'
 import { type FileTreeNode } from '@/types/gitops'
 import yaml from 'js-yaml'
+import { useQueryClient } from '@tanstack/react-query'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useResource } from '@/queries/use-resource'
+import { useUpdateResource, useGitPull, useInitializeGit, GIT_STATUS_KEYS } from '@/mutations/use-gitops-mutations'
 
 type SetupMode = 'choose' | 'new' | 'existing' | 'configured'
 
@@ -426,9 +430,38 @@ function CommitHistoryCard() {
 }
 
 export function GitSyncPage() {
-  const { fileTree, selectFile, selectedResource, updateResource, isLoading, gitStatus, gitPull, refreshGitStatus, error: gitOpsError, needsInitialization, initializeGit } = useGitOps()
+  const qc = useQueryClient()
+  const { data: fileTree } = useFileTree()
+  const { data: gitStatus } = useGitStatus()
   const { hasActiveOperations, activeOperations } = useGitProgressContext()
   const { toast } = useToast()
+
+  // Derive the Settings resource name from the file tree
+  const settingsName = useMemo(() => {
+    const findSettingsName = (node: FileTreeNode | null): string | null => {
+      if (!node) return null
+      if (node.resource?.kind === 'Settings') {
+        return node.resource.name
+      }
+      for (const child of node.children) {
+        const found = findSettingsName(child)
+        if (found) return found
+      }
+      return null
+    }
+    return findSettingsName(fileTree)
+  }, [fileTree])
+
+  // Load the Settings resource YAML by kind+name
+  const { data: resourceData } = useResource('Settings', settingsName ?? '', !!settingsName)
+
+  // Mutation hooks
+  const updateResourceMut = useUpdateResource()
+  const gitPullMut = useGitPull()
+  const initializeGitMut = useInitializeGit()
+
+  // Compute derived state
+  const initialLoadComplete = fileTree !== null && gitStatus !== null
 
   const [formData, setFormData] = useState<SettingsSpec>(createDefaultSettingsSpec())
   const [isSaving, setIsSaving] = useState(false)
@@ -441,13 +474,28 @@ export function GitSyncPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isInitializing, setIsInitializing] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
+  const [statusChecked, setStatusChecked] = useState(false)
 
-  // Refresh git status when configured mode is shown
+  const needsInitialization = Boolean(
+    initialLoadComplete &&
+    formData.git.enabled &&
+    formData.git.repository &&
+    gitStatus &&
+    !gitStatus.isRepo
+  )
+
+  const isLoading = gitPullMut.isPending || initializeGitMut.isPending || updateResourceMut.isPending
+
+  // Refresh git status when configured mode is shown, track completion
   useEffect(() => {
-    if (setupMode === 'configured') {
-      refreshGitStatus()
-    }
-  }, [setupMode, refreshGitStatus])
+    if (setupMode !== 'configured') return
+    let active = true
+    setStatusChecked(false)
+    qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] }).finally(() => {
+      if (active) setStatusChecked(true)
+    })
+    return () => { active = false }
+  }, [setupMode, qc])
 
   // Track if initial load has determined the mode
   const hasSetInitialModeRef = useRef(false)
@@ -463,6 +511,9 @@ export function GitSyncPage() {
     // Wait for settings to be loaded (initialData is set when settings are parsed)
     if (!initialData) return
 
+    // Wait for context initial load to complete so gitStatus is fresh
+    if (!initialLoadComplete) return
+
     // Mark that we've checked the initial state
     hasSetInitialModeRef.current = true
 
@@ -470,32 +521,13 @@ export function GitSyncPage() {
     if (initialData.git.enabled && initialData.git.repository) {
       setSetupMode('configured')
     }
-  }, [initialData])
+  }, [initialData, initialLoadComplete])
 
   useEffect(() => {
-    const findSettingsPath = (node: typeof fileTree): string | null => {
-      if (!node) return null
-      if (node.resource?.kind === 'Settings') {
-        return node.path
-      }
-      for (const child of node.children) {
-        const found = findSettingsPath(child)
-        if (found) return found
-      }
-      return null
-    }
-
-    const path = findSettingsPath(fileTree)
-    if (path) {
-      selectFile(path)
-    }
-  }, [fileTree, selectFile])
-
-  useEffect(() => {
-    if (!selectedResource?.yaml) return
+    if (!resourceData?.yaml) return
 
     try {
-      const parsed = yaml.load(selectedResource.yaml) as SettingsResource
+      const parsed = yaml.load(resourceData.yaml) as SettingsResource
       if (parsed?.spec) {
         const defaults = createDefaultSettingsSpec()
 
@@ -532,7 +564,7 @@ export function GitSyncPage() {
     } catch {
       setError('Failed to parse settings YAML')
     }
-  }, [selectedResource])
+  }, [resourceData])
 
 
   const updateGit = <K extends keyof SettingsSpec['git']>(
@@ -581,34 +613,32 @@ export function GitSyncPage() {
     setError(null)
 
     try {
-      const existingMetadata = selectedResource?.yaml
-        ? (yaml.load(selectedResource.yaml) as SettingsResource)?.metadata
+      const parsed = resourceData?.yaml
+        ? yaml.load(resourceData.yaml) as SettingsResource | null
         : null
+      const existingMetadata = parsed?.metadata ?? null
 
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: dataToSave,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      const success = await updateResource('Settings', 'settings', newYaml)
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: metadata.name, yamlContent: newYaml })
 
-      if (success) {
-        // Reload config so backend picks up the new settings
-        await api.config.reload()
+      // Reload config so backend picks up the new settings
+      await api.config.reload()
 
-        setFormData(dataToSave)
-        setInitialData(JSON.parse(JSON.stringify(dataToSave)))
-        setSetupMode('configured')
-        toast({
-          title: 'Settings saved',
-          description: 'Git sync has been configured successfully.',
-        })
-      } else {
-        setError(null)
-      }
+      setFormData(dataToSave)
+      setInitialData(JSON.parse(JSON.stringify(dataToSave)))
+      setSetupMode('configured')
+      toast({
+        title: 'Settings saved',
+        description: 'Git sync has been configured successfully.',
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save settings')
     } finally {
@@ -618,8 +648,8 @@ export function GitSyncPage() {
 
   const handleSync = async () => {
     try {
-      await gitPull()
-      await refreshGitStatus()
+      await gitPullMut.mutateAsync()
+      await qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] })
       toast({
         title: 'Sync complete',
         description: 'Successfully synced with remote.',
@@ -644,25 +674,26 @@ export function GitSyncPage() {
     setConnectionStatus('unknown')
 
     try {
-      const existingMetadata = selectedResource?.yaml
-        ? (yaml.load(selectedResource.yaml) as SettingsResource)?.metadata
+      const existingMetadata = resourceData?.yaml
+        ? (yaml.load(resourceData.yaml) as SettingsResource)?.metadata
         : null
 
       // Save settings with enabled: true so backend can connect to the repo
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: { ...formData, git: { ...formData.git, enabled: true } },
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
-      await updateResource('Settings', 'settings', newYaml)
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: metadata.name, yamlContent: newYaml })
 
       // Reload config so backend picks up the new settings
       await api.config.reload()
 
       // Initialize (clone) the repository so we can fetch branches
-      await initializeGit()
+      await initializeGitMut.mutateAsync()
 
       const branches = await api.git.getBranches()
       const branchNames = branches
@@ -715,18 +746,20 @@ export function GitSyncPage() {
 
     // Save the reset settings to disk
     try {
-      const existingMetadata = selectedResource?.yaml
-        ? (yaml.load(selectedResource.yaml) as SettingsResource)?.metadata
+      const parsed = resourceData?.yaml
+        ? yaml.load(resourceData.yaml) as SettingsResource | null
         : null
+      const existingMetadata = parsed?.metadata ?? null
 
+      const metadata = existingMetadata || { name: 'settings', labels: {}, annotations: {} }
       const resource: SettingsResource = {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
-        metadata: existingMetadata || { name: 'settings', labels: {}, annotations: {} },
+        metadata,
         spec: newFormData,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
-      await updateResource('Settings', 'settings', newYaml)
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: metadata.name, yamlContent: newYaml })
 
       // Reload config so backend picks up the reset settings
       await api.config.reload()
@@ -757,7 +790,7 @@ export function GitSyncPage() {
       // Ensure config is loaded before initializing
       await api.config.reload()
 
-      const result = await initializeGit()
+      const result = await initializeGitMut.mutateAsync()
       if (result) {
         // Reload config after initialization to pick up any merged changes
         await api.config.reload()
@@ -789,8 +822,16 @@ export function GitSyncPage() {
     setCurrentStep(1)
   }
 
-  // Render pending initialization state
+  // Render pending initialization state — wait for fresh status check
   if (setupMode === 'configured' && isConfigured && needsInitialization) {
+    if (!statusChecked) {
+      return (
+        <div className="flex items-center justify-center py-16" role="status" aria-label="Checking repository status">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="sr-only">Checking repository status</span>
+        </div>
+      )
+    }
     return (
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Header */}
@@ -805,10 +846,10 @@ export function GitSyncPage() {
         </div>
 
         {/* Error display */}
-        {(error || gitOpsError) && (
+        {error && (
           <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {error || gitOpsError}
+            {error}
           </div>
         )}
 
@@ -896,10 +937,10 @@ export function GitSyncPage() {
         </div>
 
         {/* Error */}
-        {(error || gitOpsError) && (
+        {error && (
           <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {error || gitOpsError}
+            {error}
           </div>
         )}
 
@@ -1012,7 +1053,7 @@ export function GitSyncPage() {
             setCommitDialogOpen(open)
             // Refresh status when dialog closes
             if (!open) {
-              refreshGitStatus()
+              qc.invalidateQueries({ queryKey: [...GIT_STATUS_KEYS] })
             }
           }}
         />
@@ -1042,10 +1083,10 @@ export function GitSyncPage() {
       </div>
 
       {/* Error */}
-      {(error || gitOpsError) && (
+      {error && (
         <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
           <AlertCircle className="h-4 w-4 shrink-0" />
-          {error || gitOpsError}
+          {error}
         </div>
       )}
 

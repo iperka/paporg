@@ -3,103 +3,99 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { FolderInput, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { YamlEditor } from '@/components/ui/yaml-editor'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useResource } from '@/queries/use-resource'
+import { useUpdateResource, useCreateResource, useDeleteResource } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import { ResourcePanel } from '@/components/resource/ResourcePanel'
 import { ImportSourceForm } from '@/components/forms/ImportSourceForm'
 import { useAutoSave } from '@/hooks/useAutoSave'
+import { useForm, useStore } from '@tanstack/react-form'
 import {
   type ImportSourceSpec,
   type ImportSourceResource,
   createDefaultImportSourceSpec,
   importSourceSpecSchema,
 } from '@/schemas/resources'
+import { zodFormValidator } from '@/lib/form-utils'
 import yaml from 'js-yaml'
 
 export function SourceEditPage() {
   const { name: urlName } = useParams({ from: '/sources/$name' })
   const { folder } = useSearch({ from: '/sources/$name' })
   const navigate = useNavigate()
-  const { fileTree, selectFile, selectedResource, updateResource, createResource, deleteResource, isLoading } = useGitOps()
   const { toast } = useToast()
 
   const isNew = urlName === 'new'
 
+  const { data: resourceData, isLoading: resourceLoading } = useResource('ImportSource', urlName, !isNew)
+  const updateResourceMut = useUpdateResource()
+  const createResourceMut = useCreateResource()
+  const deleteResourceMut = useDeleteResource()
+
+  const isLoading = resourceLoading || updateResourceMut.isPending || createResourceMut.isPending || deleteResourceMut.isPending
+
   const [resourceName, setResourceName] = useState('')
-  const [formData, setFormData] = useState<ImportSourceSpec>(createDefaultImportSourceSpec())
+  const [initialName, setInitialName] = useState('')
   const [yamlContent, setYamlContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [initialData, setInitialData] = useState<{ name: string; spec: ImportSourceSpec } | null>(null)
 
-  // Find and select the import source resource
-  useEffect(() => {
-    if (isNew) {
-      setFormData(createDefaultImportSourceSpec())
-      setResourceName('')
-      setInitialData(null)
-      return
-    }
+  // TanStack Form - use function validator for Zod schemas with .default() fields
+  const form = useForm({
+    defaultValues: createDefaultImportSourceSpec(),
+    validators: {
+      onChange: zodFormValidator(importSourceSpecSchema),
+    },
+    onSubmit: async () => {
+      // Submit handled via handleSave
+    },
+  })
 
-    const findResourcePath = (node: typeof fileTree): string | null => {
-      if (!node) return null
-      if (node.resource?.kind === 'ImportSource' && node.resource.name === urlName) {
-        return node.path
-      }
-      for (const child of node.children) {
-        const found = findResourcePath(child)
-        if (found) return found
-      }
-      return null
-    }
-
-    const path = findResourcePath(fileTree)
-    if (path) {
-      selectFile(path)
-    }
-  }, [urlName, fileTree, selectFile, isNew])
+  // Subscribe to form state via the form's store
+  const formValues = useStore(form.store, (state) => state.values)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const canSubmit = useStore(form.store, (state) => state.canSubmit)
 
   // Parse the loaded resource
   useEffect(() => {
-    if (isNew || !selectedResource?.yaml) return
+    if (isNew) {
+      form.reset(createDefaultImportSourceSpec())
+      setResourceName('')
+      setInitialName('')
+      return
+    }
+
+    if (!resourceData?.yaml) return
 
     try {
-      const parsed = yaml.load(selectedResource.yaml) as ImportSourceResource
+      const parsed = yaml.load(resourceData.yaml) as ImportSourceResource
       if (parsed?.spec && parsed.kind === 'ImportSource') {
-        setFormData(parsed.spec)
+        form.reset(parsed.spec)
         setResourceName(parsed.metadata.name)
-        setYamlContent(selectedResource.yaml)
-        setInitialData({
-          name: parsed.metadata.name,
-          spec: JSON.parse(JSON.stringify(parsed.spec)),
-        })
+        setInitialName(parsed.metadata.name)
+        setYamlContent(resourceData.yaml)
         setError(null)
       }
     } catch {
       setError('Failed to parse import source YAML')
     }
-  }, [selectedResource, isNew])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourceData, isNew])
 
   // Check for unsaved changes
   const hasChanges = useMemo(() => {
     if (isNew) {
-      return resourceName.trim() !== '' || formData.local?.path !== ''
+      return isDirty || resourceName.trim() !== '' || formValues.local?.path !== ''
     }
-    if (!initialData) return false
-
-    return (
-      resourceName !== initialData.name ||
-      JSON.stringify(formData) !== JSON.stringify(initialData.spec)
-    )
-  }, [formData, resourceName, initialData, isNew])
+    return isDirty || resourceName !== initialName
+  }, [formValues, resourceName, initialName, isNew, isDirty])
 
   // Check if form is valid for auto-save
   const isValidForSave = useMemo(() => {
     if (!resourceName.trim()) return false
     if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(resourceName)) return false
-    const validation = importSourceSpecSchema.safeParse(formData)
-    return validation.success
-  }, [resourceName, formData])
+    return canSubmit
+  }, [resourceName, canSubmit])
 
   // Sync form changes to YAML
   useEffect(() => {
@@ -110,40 +106,43 @@ export function SourceEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'ImportSource',
         metadata: { name: resourceName || 'new_source', labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       setYamlContent(yaml.dump(resource, { lineWidth: -1 }))
     } catch {
       // Ignore serialization errors while editing
     }
-  }, [formData, resourceName, isNew])
+  }, [formValues, resourceName, isNew])
 
   // Auto-save handler
   const handleAutoSave = useCallback(async () => {
     if (isNew || !isValidForSave) return
 
+    // Snapshot values before async save to avoid overwriting concurrent edits
+    const savedValues = structuredClone(formValues)
+    const savedName = resourceName
+
     const resource: ImportSourceResource = {
       apiVersion: 'paporg.io/v1',
       kind: 'ImportSource',
-      metadata: { name: resourceName, labels: {}, annotations: {} },
-      spec: formData,
+      metadata: { name: savedName, labels: {}, annotations: {} },
+      spec: savedValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-    const success = await updateResource('ImportSource', urlName, newYaml)
-    if (success) {
-      setInitialData({
-        name: resourceName,
-        spec: JSON.parse(JSON.stringify(formData)),
-      })
-    } else {
+    try {
+      await updateResourceMut.mutateAsync({ kind: 'ImportSource', name: urlName, yamlContent: newYaml })
+      // Reset form baseline after save (updates default values to current)
+      form.reset(savedValues)
+      setInitialName(savedName)
+    } catch {
       throw new Error('Failed to save')
     }
-  }, [isNew, isValidForSave, resourceName, formData, updateResource, urlName])
+  }, [isNew, isValidForSave, resourceName, formValues, updateResourceMut, urlName, form])
 
   // Auto-save hook
   const { status: autoSaveStatus, lastSaved, error: autoSaveError } = useAutoSave({
-    data: { resourceName, formData },
+    data: { resourceName, formValues },
     onSave: handleAutoSave,
     delay: 1500,
     enabled: !isNew && isValidForSave,
@@ -159,7 +158,9 @@ export function SourceEditPage() {
       if (parsed?.spec && parsed.kind === 'ImportSource') {
         const validated = importSourceSpecSchema.safeParse(parsed.spec)
         if (validated.success) {
-          setFormData(validated.data)
+          for (const [key, val] of Object.entries(validated.data)) {
+            form.setFieldValue(key as keyof ImportSourceSpec, val as never)
+          }
           if (parsed.metadata?.name) {
             setResourceName(parsed.metadata.name)
           }
@@ -173,7 +174,6 @@ export function SourceEditPage() {
 
   // Save handler
   const handleSave = async () => {
-    // Validate name
     if (!resourceName.trim()) {
       setError('Source name is required')
       return
@@ -184,11 +184,8 @@ export function SourceEditPage() {
       return
     }
 
-    // Validate spec
-    const validation = importSourceSpecSchema.safeParse(formData)
-    if (!validation.success) {
-      const firstError = validation.error.errors[0]
-      setError(`Validation error: ${firstError.path.join('.')}: ${firstError.message}`)
+    if (!canSubmit) {
+      setError('Form has validation errors')
       return
     }
 
@@ -200,39 +197,31 @@ export function SourceEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'ImportSource',
         metadata: { name: resourceName, labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      let success: boolean
       if (isNew) {
-        // If folder is provided, create the resource in that folder
         const targetPath = folder ? `${folder}/${resourceName}.yaml` : undefined
-        success = await createResource('ImportSource', newYaml, targetPath)
+        await createResourceMut.mutateAsync({ kind: 'ImportSource', yamlContent: newYaml, path: targetPath })
       } else {
-        success = await updateResource('ImportSource', urlName, newYaml)
+        await updateResourceMut.mutateAsync({ kind: 'ImportSource', name: urlName, yamlContent: newYaml })
       }
 
-      if (success) {
-        setInitialData({
-          name: resourceName,
-          spec: JSON.parse(JSON.stringify(formData)),
-        })
-        toast({
-          title: isNew ? 'Source created' : 'Source saved',
-          description: isNew
-            ? `Import source "${resourceName}" has been created.`
-            : 'Your changes have been saved.',
-        })
+      form.reset(formValues)
+      setInitialName(resourceName)
+      toast({
+        title: isNew ? 'Source created' : 'Source saved',
+        description: isNew
+          ? `Import source "${resourceName}" has been created.`
+          : 'Your changes have been saved.',
+      })
 
-        if (isNew) {
-          navigate({ to: '/sources/$name', params: { name: resourceName } })
-        }
-      } else {
-        setError(isNew ? 'Failed to create source' : 'Failed to save source')
+      if (isNew) {
+        navigate({ to: '/sources/$name', params: { name: resourceName } })
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save source')
+      setError(e instanceof Error ? e.message : isNew ? 'Failed to create source' : 'Failed to save source')
     } finally {
       setIsSaving(false)
     }
@@ -240,23 +229,19 @@ export function SourceEditPage() {
 
   // Delete handler
   const handleDelete = async () => {
-    if (isNew) return
+    if (isNew || isSaving) return
 
     const confirmed = window.confirm(`Are you sure you want to delete the import source "${urlName}"?`)
     if (!confirmed) return
 
     setIsSaving(true)
     try {
-      const success = await deleteResource('ImportSource', urlName)
-      if (success) {
-        toast({
-          title: 'Source deleted',
-          description: `Import source "${urlName}" has been deleted.`,
-        })
-        navigate({ to: '/sources' })
-      } else {
-        setError('Failed to delete source')
-      }
+      await deleteResourceMut.mutateAsync({ kind: 'ImportSource', name: urlName })
+      toast({
+        title: 'Source deleted',
+        description: `Import source "${urlName}" has been deleted.`,
+      })
+      navigate({ to: '/sources' })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete source')
     } finally {
@@ -297,8 +282,7 @@ export function SourceEditPage() {
         lastSaved={lastSaved}
         formContent={
           <ImportSourceForm
-            value={formData}
-            onChange={setFormData}
+            form={form}
             isNew={isNew}
             name={resourceName}
             onNameChange={setResourceName}
