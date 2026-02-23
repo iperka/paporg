@@ -8,6 +8,28 @@ use std::sync::LazyLock;
 static RE_VARIABLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\$([a-zA-Z_][a-zA-Z0-9_]*)").unwrap());
 
+/// Names reserved for built-in variables. Extracted variables must not use these names.
+const BUILTIN_VARIABLE_NAMES: &[&str] = &[
+    "y",
+    "year",
+    "m",
+    "month",
+    "d",
+    "day",
+    "h",
+    "hour",
+    "i",
+    "minute",
+    "s",
+    "second",
+    "original",
+    "timestamp",
+    "ext",
+    "extension",
+    "category",
+    "uuid",
+];
+
 use super::error::{GitOpsError, Result};
 use super::loader::LoadedConfig;
 use super::resource::{
@@ -114,6 +136,14 @@ impl ConfigValidator {
             self.errors.push(format!(
                 "Variable '{}': name must be a valid identifier (letters, numbers, underscores, hyphens)",
                 name
+            ));
+        }
+
+        // Check for collision with built-in variable names
+        if BUILTIN_VARIABLE_NAMES.contains(&name.as_str()) {
+            self.errors.push(format!(
+                "Variable '{}': extracted variable name '{}' conflicts with built-in variable",
+                name, name
             ));
         }
 
@@ -272,22 +302,7 @@ impl ConfigValidator {
             .collect();
 
         // Built-in variables
-        let builtin_vars: HashSet<&str> = [
-            "y",
-            "year",
-            "m",
-            "month",
-            "d",
-            "day",
-            "original",
-            "timestamp",
-            "ext",
-            "extension",
-            "category",
-            "uuid",
-        ]
-        .into_iter()
-        .collect();
+        let builtin_vars: HashSet<&str> = BUILTIN_VARIABLE_NAMES.iter().copied().collect();
 
         for rule in &config.rules {
             let rule_name = &rule.resource.metadata.name;
@@ -2071,5 +2086,171 @@ mod tests {
         assert!(!is_valid_mime_pattern("/pdf")); // Empty type
         assert!(!is_valid_mime_pattern("application/pdf/extra")); // Too many parts
         assert!(!is_valid_mime_pattern("application pdf")); // Space instead of slash
+    }
+
+    // ========================================================================
+    // Built-in variable collision tests
+    // ========================================================================
+
+    #[test]
+    fn test_variable_name_conflicts_with_builtin() {
+        // "year" is a built-in — should be rejected
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("year", r"(?P<year>\d{4})"),
+                "variables/year.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_err());
+        assert!(validator
+            .errors()
+            .iter()
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("year")));
+    }
+
+    #[test]
+    fn test_variable_name_conflicts_with_builtin_h() {
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("h", r"(?P<h>\d+)"),
+                "variables/h.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_err());
+        assert!(validator
+            .errors()
+            .iter()
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("'h'")));
+    }
+
+    #[test]
+    fn test_variable_name_conflicts_with_builtin_i() {
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("i", r"(?P<i>\d+)"),
+                "variables/i.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_err());
+        assert!(validator
+            .errors()
+            .iter()
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("'i'")));
+    }
+
+    #[test]
+    fn test_variable_name_conflicts_with_builtin_s() {
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("s", r"(?P<s>\d+)"),
+                "variables/s.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_err());
+        assert!(validator
+            .errors()
+            .iter()
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("'s'")));
+    }
+
+    #[test]
+    fn test_variable_name_conflicts_with_builtin_timestamp() {
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("timestamp", r"(?P<timestamp>\d+)"),
+                "variables/timestamp.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_err());
+        assert!(validator
+            .errors()
+            .iter()
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("timestamp")));
+    }
+
+    #[test]
+    fn test_non_builtin_variable_name_accepted() {
+        // "vendor" is NOT a built-in — should be accepted
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("vendor", r"(?P<vendor>\w+)"),
+                "variables/vendor.yaml",
+            )],
+            rules: vec![],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_ok(), "Errors: {:?}", validator.errors());
+    }
+
+    #[test]
+    fn test_builtin_time_vars_accepted_in_templates() {
+        // Rules that reference h, i, s builtins in templates should be valid
+        let mut rule = create_minimal_rule("test");
+        rule.spec.output.directory = "$y/$m/$d".to_string();
+        rule.spec.output.filename = "$original_$h$i$s".to_string();
+
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![],
+            rules: vec![ResourceWithPath::new(rule, "rules/test.yaml")],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_ok(), "Errors: {:?}", validator.errors());
+    }
+
+    #[test]
+    fn test_builtin_time_alias_vars_accepted_in_templates() {
+        // Rules that reference hour, minute, second aliases in templates should be valid
+        let mut rule = create_minimal_rule("test");
+        rule.spec.output.directory = "$year/$month/$day".to_string();
+        rule.spec.output.filename = "$original_$hour$minute$second".to_string();
+
+        let config = LoadedConfig {
+            settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
+            variables: vec![],
+            rules: vec![ResourceWithPath::new(rule, "rules/test.yaml")],
+            import_sources: vec![],
+        };
+
+        let mut validator = ConfigValidator::new();
+        let result = validator.validate(&config);
+        assert!(result.is_ok(), "Errors: {:?}", validator.errors());
     }
 }
