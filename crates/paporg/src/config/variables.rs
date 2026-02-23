@@ -446,7 +446,12 @@ mod tests {
 
         // Each segment should be a 2-digit number separated by underscores (sanitized from '/')
         for part in result.split('_') {
-            assert_eq!(part.len(), 2, "time component '{}' should be 2 digits", part);
+            assert_eq!(
+                part.len(),
+                2,
+                "time component '{}' should be 2 digits",
+                part
+            );
             assert!(
                 part.chars().all(|c| c.is_ascii_digit()),
                 "time component '{}' should be numeric",
