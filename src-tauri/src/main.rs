@@ -149,6 +149,12 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -294,6 +300,7 @@ fn main() {
             commands::git_log,
             commands::git_cancel_operation,
             commands::git_initialize,
+            commands::git_disconnect,
             // Email OAuth commands
             commands::start_email_authorization,
             commands::check_authorization_status,

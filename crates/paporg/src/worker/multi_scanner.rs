@@ -703,8 +703,8 @@ mod tests {
         use crate::gitops::loader::LoadedConfig;
         use crate::gitops::resource::ResourceWithPath;
         use crate::gitops::resource::{
-            AiSettings, DefaultOutputSettings, GitSettings, ObjectMeta, OcrSettings, ResourceKind,
-            SettingsResource, SettingsSpec, API_VERSION,
+            AiSettings, DefaultOutputSettings, GitSettings, ObjectMeta, OcrSettings, ReleaseChannel,
+            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let settings = SettingsResource {
@@ -719,6 +719,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         };
 
@@ -744,7 +745,7 @@ mod tests {
         use crate::gitops::resource::{
             AiSettings, DefaultOutputSettings, FileFilters, GitSettings, ImportSourceResource,
             ImportSourceSpec, ImportSourceType, LocalSourceConfig, ObjectMeta, OcrSettings,
-            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
+            ReleaseChannel, ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -766,6 +767,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         };
 
@@ -814,7 +816,7 @@ mod tests {
         use crate::gitops::resource::{
             AiSettings, DefaultOutputSettings, FileFilters, GitSettings, ImportSourceResource,
             ImportSourceSpec, ImportSourceType, LocalSourceConfig, ObjectMeta, OcrSettings,
-            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
+            ReleaseChannel, ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -836,6 +838,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         };
 
@@ -886,7 +889,7 @@ mod tests {
         use crate::gitops::resource::{
             AiSettings, DefaultOutputSettings, FileFilters, GitSettings, ImportSourceResource,
             ImportSourceSpec, ImportSourceType, LocalSourceConfig, ObjectMeta, OcrSettings,
-            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
+            ReleaseChannel, ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -908,6 +911,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         };
 
@@ -983,7 +987,7 @@ mod tests {
         use crate::gitops::resource::{
             AiSettings, DefaultOutputSettings, FileFilters, GitSettings, ImportSourceResource,
             ImportSourceSpec, ImportSourceType, LocalSourceConfig, ObjectMeta, OcrSettings,
-            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
+            ReleaseChannel, ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -1001,6 +1005,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         };
 

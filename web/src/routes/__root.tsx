@@ -8,6 +8,7 @@ import { JobsProvider } from '@/contexts/JobsContext'
 import { LogStreamProvider } from '@/contexts/LogStreamContext'
 import { GitInitializeBanner } from '@/components/gitops/GitInitializeBanner'
 import { ConflictDialog } from '@/components/gitops/ConflictDialog'
+import { UpdateDialog } from '@/components/UpdateDialog'
 import { useState } from 'react'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -48,6 +49,7 @@ export function RootLayout() {
                   result={conflictResult}
                 />
                 <Toaster />
+                <UpdateDialog />
               </SidebarProvider>
             </SelectedFileProvider>
           </JobsProvider>

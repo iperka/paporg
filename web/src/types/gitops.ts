@@ -19,6 +19,8 @@ export interface Resource<T> {
 }
 
 // Settings Resource
+export type ReleaseChannel = 'stable' | 'pre-release'
+
 export interface SettingsSpec {
   inputDirectory: string
   outputDirectory: string
@@ -26,6 +28,7 @@ export interface SettingsSpec {
   ocr: OcrSettings
   defaults: DefaultOutputSettings
   git: GitSettings
+  releaseChannel?: ReleaseChannel
 }
 
 export interface OcrSettings {

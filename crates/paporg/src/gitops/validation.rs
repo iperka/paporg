@@ -856,6 +856,7 @@ mod tests {
                 defaults: DefaultOutputSettings::default(),
                 git: GitSettings::default(),
                 ai: AiSettings::default(),
+                release_channel: ReleaseChannel::default(),
             },
         )
     }

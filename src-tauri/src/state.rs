@@ -293,6 +293,17 @@ impl TauriAppState {
         let _ = self.process_tx.send(());
     }
 
+    /// Tears down all git sync artifacts (scheduler, config listener, reconciler).
+    pub fn tear_down_git_sync(&mut self) {
+        if let Some(scheduler) = self.sync_scheduler.take() {
+            scheduler.stop();
+        }
+        if let Some(handle) = self.config_listener_handle.take() {
+            handle.abort();
+        }
+        self.reconciler = None;
+    }
+
     /// Sets up git sync: creates the reconciler and optionally starts the background scheduler.
     /// Also wires up the config change listener so git-pulled changes auto-reload the UI.
     pub fn setup_git_sync(
@@ -319,21 +330,12 @@ impl TauriAppState {
 
         if !git_settings.enabled {
             info!("Git sync not started: git is disabled in settings");
-            // Clean up existing sync artifacts from a previous enabled state
-            if let Some(scheduler) = self.sync_scheduler.take() {
-                scheduler.stop();
-            }
-            if let Some(handle) = self.config_listener_handle.take() {
-                handle.abort();
-            }
-            self.reconciler = None;
+            self.tear_down_git_sync();
             return Ok(());
         }
 
-        // Stop existing scheduler to prevent thread leak on re-enable
-        if let Some(scheduler) = self.sync_scheduler.take() {
-            scheduler.stop();
-        }
+        // Tear down existing sync to prevent thread leak on re-enable
+        self.tear_down_git_sync();
 
         let repo = GitRepository::new(&config_dir, git_settings.clone());
         let reconciler = Arc::new(GitReconciler::new(repo, self.config_change_sender.clone()));

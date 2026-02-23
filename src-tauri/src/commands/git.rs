@@ -6,6 +6,7 @@ use paporg::gitops::git::{
     BranchInfo, CommitInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus,
     PullResult,
 };
+use std::path::PathBuf;
 use paporg::gitops::progress::GitOperationType;
 use tauri::State;
 use tokio::sync::RwLock;
@@ -394,7 +395,10 @@ pub async fn git_initialize(
     let has_local_commits = repo.has_commits();
 
     if !has_local_commits {
-        match repo.checkout_remote_branch(&branch) {
+        // No local commits — checkout from remote.  Use force checkout so
+        // existing local files (e.g. after a disconnect+reconnect) don't
+        // block the operation.
+        match repo.force_checkout_remote_branch(&branch) {
             Ok(()) => {
                 reload_and_notify(&app, &state).await;
 
@@ -495,4 +499,36 @@ pub async fn git_initialize(
             Ok(ApiResponse::err(format!("Failed to merge: {}", e)))
         }
     }
+}
+
+/// Disconnect git repository — tears down sync and removes the .git directory.
+#[tauri::command]
+pub async fn git_disconnect(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<RwLock<TauriAppState>>>,
+) -> Result<ApiResponse<()>, String> {
+    let mut state_write = state.write().await;
+
+    let config_dir: PathBuf = match &state_write.config_dir {
+        Some(dir) => dir.clone(),
+        None => return Ok(ApiResponse::err("No config directory set")),
+    };
+
+    // Tear down git sync first so nothing accesses .git while we delete it
+    state_write.tear_down_git_sync();
+    drop(state_write);
+
+    // Remove the .git directory
+    let git_dir = config_dir.join(".git");
+    if git_dir.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&git_dir) {
+            return Ok(ApiResponse::err(format!(
+                "Failed to remove .git directory: {}",
+                e
+            )));
+        }
+    }
+
+    crate::events::emit_config_changed(&app);
+    Ok(ApiResponse::ok(()))
 }

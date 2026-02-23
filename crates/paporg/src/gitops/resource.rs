@@ -132,6 +132,19 @@ impl<T> Resource<T> {
 // Settings Resource
 // ============================================================================
 
+/// Release channel for automatic updates.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReleaseChannel {
+    #[default]
+    Stable,
+    PreRelease,
+}
+
+fn default_release_channel() -> ReleaseChannel {
+    ReleaseChannel::Stable
+}
+
 /// Settings specification - global configuration for paporg.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +174,10 @@ pub struct SettingsSpec {
     /// AI settings for rule suggestions.
     #[serde(default)]
     pub ai: AiSettings,
+
+    /// Release channel for automatic updates.
+    #[serde(default = "default_release_channel")]
+    pub release_channel: ReleaseChannel,
 }
 
 fn default_worker_count() -> usize {
@@ -1004,6 +1021,7 @@ mod tests {
             defaults: DefaultOutputSettings::default(),
             git: GitSettings::default(),
             ai: AiSettings::default(),
+            release_channel: ReleaseChannel::default(),
         };
         let resource: SettingsResource = Resource::new(ResourceKind::Settings, "default", spec);
 
@@ -1071,6 +1089,7 @@ mod tests {
             defaults: DefaultOutputSettings::default(),
             git: GitSettings::default(),
             ai: AiSettings::default(),
+            release_channel: ReleaseChannel::default(),
         };
         let resource: SettingsResource = Resource::new(ResourceKind::Settings, "default", spec);
 

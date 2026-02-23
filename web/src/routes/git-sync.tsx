@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SecretField } from '@/components/form'
 import { BranchSelector } from '@/components/gitops/BranchSelector'
 import { CommitDialog } from '@/components/gitops/CommitDialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, type CommitInfo } from '@/api'
 import {
   type SettingsSpec,
@@ -474,7 +475,9 @@ export function GitSyncPage() {
   const [currentStep, setCurrentStep] = useState(1)
   const [isInitializing, setIsInitializing] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
+  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
   const [statusChecked, setStatusChecked] = useState(false)
+  const userDisconnectedRef = useRef(false)
 
   const needsInitialization = Boolean(
     initialLoadComplete &&
@@ -501,18 +504,26 @@ export function GitSyncPage() {
   const hasSetInitialModeRef = useRef(false)
 
   const isBusy = isLoading || hasActiveOperations
-  const isConfigured = formData.git.enabled && formData.git.repository
+  const isConfigured = (formData.git.enabled && formData.git.repository) || (gitStatus?.isRepo && !userDisconnectedRef.current)
 
   // Determine initial mode based on current state - only on first meaningful load
   useEffect(() => {
     // Skip if we've already determined the initial mode
     if (hasSetInitialModeRef.current) return
 
-    // Wait for settings to be loaded (initialData is set when settings are parsed)
-    if (!initialData) return
-
     // Wait for context initial load to complete so gitStatus is fresh
     if (!initialLoadComplete) return
+
+    // If a git repo already exists on disk, treat as configured even when
+    // settings haven't loaded yet (e.g. during dev server restart).
+    if (gitStatus?.isRepo) {
+      hasSetInitialModeRef.current = true
+      setSetupMode('configured')
+      return
+    }
+
+    // Wait for settings to be loaded (initialData is set when settings are parsed)
+    if (!initialData) return
 
     // Mark that we've checked the initial state
     hasSetInitialModeRef.current = true
@@ -521,7 +532,7 @@ export function GitSyncPage() {
     if (initialData.git.enabled && initialData.git.repository) {
       setSetupMode('configured')
     }
-  }, [initialData, initialLoadComplete])
+  }, [initialData, initialLoadComplete, gitStatus])
 
   useEffect(() => {
     if (!resourceData?.yaml) return
@@ -634,6 +645,7 @@ export function GitSyncPage() {
 
       setFormData(dataToSave)
       setInitialData(JSON.parse(JSON.stringify(dataToSave)))
+      userDisconnectedRef.current = false
       setSetupMode('configured')
       toast({
         title: 'Settings saved',
@@ -724,6 +736,8 @@ export function GitSyncPage() {
   }
 
   const handleDisable = async () => {
+    setDisconnectDialogOpen(false)
+
     // Reset all git settings to defaults
     const resetGit = {
       enabled: false,
@@ -744,8 +758,10 @@ export function GitSyncPage() {
       git: resetGit,
     }
 
-    // Save the reset settings to disk
+    // Remove .git directory and tear down sync, then save reset settings
     try {
+      await api.git.disconnect()
+
       const parsed = resourceData?.yaml
         ? yaml.load(resourceData.yaml) as SettingsResource | null
         : null
@@ -764,8 +780,11 @@ export function GitSyncPage() {
       // Reload config so backend picks up the reset settings
       await api.config.reload()
     } catch (e) {
-      console.error('Failed to save reset settings:', e)
+      console.error('Failed to disconnect repository:', e)
     }
+
+    // Prevent gitStatus.isRepo from overriding the disconnect
+    userDisconnectedRef.current = true
 
     setFormData(newFormData)
     // Also reset initialData so the mode check doesn't redirect back
@@ -899,10 +918,30 @@ export function GitSyncPage() {
 
         {/* Option to change settings */}
         <div className="flex justify-center">
-          <Button variant="ghost" size="sm" onClick={handleDisable}>
+          <Button variant="ghost" size="sm" onClick={() => setDisconnectDialogOpen(true)}>
             Change Repository Settings
           </Button>
         </div>
+
+        {/* Disconnect Confirmation Dialog */}
+        <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Disconnect Repository?</DialogTitle>
+              <DialogDescription>
+                This will disable Git sync and reset all repository settings. Your local configuration files will not be deleted, but automatic syncing will stop.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDisconnectDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleDisable}>
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -1060,10 +1099,30 @@ export function GitSyncPage() {
 
         {/* Actions */}
         <div className="flex justify-end">
-          <Button variant="ghost" size="sm" onClick={handleDisable}>
+          <Button variant="ghost" size="sm" onClick={() => setDisconnectDialogOpen(true)}>
             Disconnect Repository
           </Button>
         </div>
+
+        {/* Disconnect Confirmation Dialog */}
+        <Dialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Disconnect Repository?</DialogTitle>
+              <DialogDescription>
+                This will disable Git sync and reset all repository settings. Your local configuration files will not be deleted, but automatic syncing will stop.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDisconnectDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={handleDisable}>
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

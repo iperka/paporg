@@ -449,6 +449,11 @@ export const api = {
       const response = await invoke<ApiResponse<InitializeResult>>('git_initialize');
       return unwrap(response);
     },
+
+    disconnect: async (): Promise<void> => {
+      const response = await invoke<ApiResponse<void>>('git_disconnect');
+      return unwrap(response);
+    },
   },
 
   // ---------------------------------------------------------------------------

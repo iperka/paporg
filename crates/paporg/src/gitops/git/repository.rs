@@ -73,6 +73,23 @@ impl GitRepository {
         }
     }
 
+    /// Force-checks out a remote branch, overwriting any local untracked files.
+    /// Used during initialization when there are no local commits.
+    pub fn force_checkout_remote_branch(&self, branch: &str) -> Result<()> {
+        if !self.is_git_repo() {
+            return Err(GitOpsError::GitNotInitialized);
+        }
+
+        let remote_ref = format!("origin/{}", branch);
+        let output = self.run_git(&["checkout", "-f", "-B", branch, &remote_ref])?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(GitOpsError::GitOperation(format_git_error(&output)))
+        }
+    }
+
     /// Gets the current branch name.
     pub fn current_branch(&self) -> Result<String> {
         let output = self.run_git(&["rev-parse", "--abbrev-ref", "HEAD"])?;

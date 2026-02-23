@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import {
   Accordion,
   AccordionContent,
@@ -5,15 +6,35 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { TextField, NumberField, SwitchField, SelectField, ArrayField, SecretField, PathField } from '@/components/form'
-import { Folder, Eye, GitBranch, Settings as SettingsIcon } from 'lucide-react'
+import { Folder, Eye, GitBranch, Settings as SettingsIcon, Download } from 'lucide-react'
 import { useStore } from '@tanstack/react-form'
 import type { FormInstance } from '@/lib/form-utils'
+import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 
 interface SettingsFormProps {
   form: FormInstance
 }
 
 export function SettingsForm({ form }: SettingsFormProps) {
+  // Autostart state (not part of settings.yaml — machine-specific)
+  const [autostart, setAutostart] = useState(false)
+  useEffect(() => {
+    isEnabled().then(setAutostart).catch(() => {})
+  }, [])
+
+  const handleAutostartChange = async (checked: boolean) => {
+    try {
+      if (checked) {
+        await enable()
+      } else {
+        await disable()
+      }
+      setAutostart(checked)
+    } catch {
+      // Autostart may not be available in dev mode
+    }
+  }
+
   // Subscribe to conditional-rendering values at the top level
   const ocrEnabled: boolean = useStore(form.store, (state) => state.values.ocr.enabled)
   const gitEnabled: boolean = useStore(form.store, (state) => state.values.git.enabled)
@@ -147,6 +168,38 @@ export function SettingsForm({ form }: SettingsFormProps) {
                 error={field.state.meta.errors?.[0]}
                 required
                 mono
+              />
+            )} />
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+
+      {/* Updates */}
+      <AccordionItem value="updates">
+        <AccordionTrigger className="hover:no-underline">
+          <div className="flex items-center gap-2">
+            <Download className="h-4 w-4" />
+            Updates
+          </div>
+        </AccordionTrigger>
+        <AccordionContent>
+          <div className="space-y-4 pt-4">
+            <SwitchField
+              label="Launch at Login"
+              checked={autostart}
+              onChange={handleAutostartChange}
+              description="Automatically start Paporg when you log in to your computer"
+            />
+            <form.Field name="releaseChannel" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <SelectField
+                label="Release Channel"
+                value={field.state.value}
+                onChange={field.handleChange}
+                options={[
+                  { value: 'stable', label: 'Stable — only production releases' },
+                  { value: 'pre-release', label: 'Pre-release — includes beta/RC builds' },
+                ]}
+                description="Choose which update channel to follow. Stable receives only tested production releases, while Pre-release also includes beta and release candidate builds."
               />
             )} />
           </div>

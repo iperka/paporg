@@ -792,6 +792,7 @@ spec:
                 defaults: super::super::resource::DefaultOutputSettings::default(),
                 git: super::super::resource::GitSettings::default(),
                 ai: super::super::resource::AiSettings::default(),
+                release_channel: super::super::resource::ReleaseChannel::default(),
             },
         };
 
@@ -910,6 +911,7 @@ jobs:
                 defaults: super::super::resource::DefaultOutputSettings::default(),
                 git: super::super::resource::GitSettings::default(),
                 ai: super::super::resource::AiSettings::default(),
+                release_channel: super::super::resource::ReleaseChannel::default(),
             },
         };
 

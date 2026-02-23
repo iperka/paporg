@@ -53,6 +53,10 @@ export const defaultOutputSettingsSchema = z.object({
 
 export type DefaultOutputSettings = z.infer<typeof defaultOutputSettingsSchema>
 
+export const releaseChannelSchema = z.enum(['stable', 'pre-release']).default('stable')
+
+export type ReleaseChannel = z.infer<typeof releaseChannelSchema>
+
 export const settingsSpecSchema = z.object({
   inputDirectory: z.string().min(1, 'Input directory is required'),
   outputDirectory: z.string().min(1, 'Output directory is required'),
@@ -60,6 +64,7 @@ export const settingsSpecSchema = z.object({
   ocr: ocrSettingsSchema,
   defaults: defaultOutputSettingsSchema,
   git: gitSettingsSchema,
+  releaseChannel: releaseChannelSchema,
 })
 
 export type SettingsSpec = z.infer<typeof settingsSpecSchema>
@@ -375,6 +380,7 @@ export function createDefaultSettingsSpec(): SettingsSpec {
       userName: 'Paporg',
       userEmail: 'paporg@localhost',
     },
+    releaseChannel: 'stable',
   }
 }
 
