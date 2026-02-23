@@ -13,9 +13,10 @@ export function useConfigChangeInvalidation() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null
+    let cancelled = false
 
     const setup = async () => {
-      unlisten = await listen<ConfigChangeEvent>(
+      const fn = await listen<ConfigChangeEvent>(
         'paporg://config-changed',
         (_event) => {
           qc.invalidateQueries({ queryKey: ['gitops', 'file-tree'] })
@@ -24,10 +25,16 @@ export function useConfigChangeInvalidation() {
           qc.invalidateQueries({ queryKey: ['gitops', 'resources'] })
         },
       )
+      if (cancelled) {
+        fn()
+      } else {
+        unlisten = fn
+      }
     }
 
     setup()
     return () => {
+      cancelled = true
       unlisten?.()
     }
   }, [qc])

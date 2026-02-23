@@ -20,7 +20,7 @@ import type { FileTreeNode } from '@/types/gitops'
 import yaml from 'js-yaml'
 
 export function SettingsPage() {
-  const { data: fileTree } = useFileTree()
+  const { data: fileTree, isLoading: isTreeLoading } = useFileTree()
   const updateResourceMut = useUpdateResource()
   const { toast } = useToast()
 
@@ -62,7 +62,8 @@ export function SettingsPage() {
   }, [fileTree])
 
   // Load the settings resource directly by kind+name
-  const { data: settingsResource, isLoading } = useResource('Settings', settingsName ?? '', !!settingsName)
+  const { data: settingsResource, isLoading: isResourceLoading } = useResource('Settings', settingsName ?? '', !!settingsName)
+  const isLoading = isTreeLoading || isResourceLoading
 
   // Parse the loaded resource
   useEffect(() => {

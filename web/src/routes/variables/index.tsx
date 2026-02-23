@@ -11,13 +11,14 @@ import { useToast } from '@/components/ui/use-toast'
 import type { FileTreeNode } from '@/types/gitops'
 
 export function VariablesPage() {
-  const { data: fileTree } = useFileTree()
+  const { data: fileTree, isLoading: isTreeLoading } = useFileTree()
   const createDirectoryMut = useCreateDirectory()
   const { toast } = useToast()
   const [showFolderDialog, setShowFolderDialog] = useState(false)
 
   // Extract variables from file tree
   const getVariables = (): { name: string; path: string }[] => {
+    if (isTreeLoading || !fileTree) return []
     const variables: { name: string; path: string }[] = []
 
     const traverse = (node: FileTreeNode | null) => {
@@ -43,7 +44,7 @@ export function VariablesPage() {
         description: `Created folder "${name}"`,
       })
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to create folder')
+      throw err instanceof Error ? err : new Error('Failed to create folder')
     }
   }
 

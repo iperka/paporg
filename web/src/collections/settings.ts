@@ -20,7 +20,8 @@ export const settingsCollection = createCollection(
         const parsed = yaml.load(resource.yaml) as SettingsResource | undefined
         if (!parsed) return []
         return [{ id: 'settings', ...parsed } as SettingsItem]
-      } catch {
+      } catch (err) {
+        console.error('Failed to parse Settings YAML:', err)
         return []
       }
     },

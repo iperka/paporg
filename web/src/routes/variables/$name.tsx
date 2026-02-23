@@ -87,7 +87,7 @@ export function VariableEditPage() {
       return resourceName.trim() !== '' || isDirty
     }
     return isDirty || resourceName !== initialName
-  }, [formValues, resourceName, initialName, isNew, isDirty])
+  }, [resourceName, initialName, isNew, isDirty])
 
   // Check if form is valid for auto-save
   const isValidForSave = useMemo(() => {

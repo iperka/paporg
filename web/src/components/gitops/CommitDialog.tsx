@@ -62,6 +62,8 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       setCurrentOperationId(null)
       setDiffFile(null)
       setDiffContent(null)
+      setIsGenerating(false)
+      setIsDiffLoading(false)
       // Select all files by default
       setSelectedFiles(new Set(allFiles.map((f) => f.path)))
     }

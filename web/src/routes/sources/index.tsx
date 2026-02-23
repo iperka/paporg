@@ -44,7 +44,7 @@ export function SourcesPage() {
         description: `Created folder "${name}"`,
       })
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : 'Failed to create folder')
+      throw err instanceof Error ? err : new Error('Failed to create folder')
     }
   }
 

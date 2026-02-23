@@ -60,6 +60,7 @@ export function SelectedFileProvider({ children }: { children: React.ReactNode }
           })
         } catch (err) {
           console.warn('SelectedFileContext: failed to read file', err)
+          if (requestIdRef.current === requestId) setSelectedResource(null)
         }
         return
       }
@@ -75,6 +76,7 @@ export function SelectedFileProvider({ children }: { children: React.ReactNode }
           setSelectedResource({ name: resourceInfo.name, path, yaml: content })
         } catch (err) {
           console.warn('SelectedFileContext: fallback file read failed', err)
+          if (requestIdRef.current === requestId) setSelectedResource(null)
         }
       }
     },
