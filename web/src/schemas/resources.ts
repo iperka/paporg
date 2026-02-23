@@ -93,9 +93,10 @@ export const simpleMatchSchema = z.object({
   containsAny: z.array(z.string()).optional(),
   containsAll: z.array(z.string()).optional(),
   pattern: z.string().optional(),
+  caseSensitive: z.boolean().optional(),
 }).refine(
   (data) => {
-    const keys = Object.keys(data).filter(k => data[k as keyof typeof data] !== undefined)
+    const keys = Object.keys(data).filter(k => k !== 'caseSensitive' && data[k as keyof typeof data] !== undefined)
     return keys.length === 1
   },
   { message: 'Exactly one match type must be specified' }
@@ -103,23 +104,23 @@ export const simpleMatchSchema = z.object({
 
 // Recursive match condition schema using z.lazy
 export type MatchCondition =
-  | { contains: string }
-  | { containsAny: string[] }
-  | { containsAll: string[] }
-  | { pattern: string }
-  | { all: MatchCondition[] }
-  | { any: MatchCondition[] }
-  | { not: MatchCondition }
+  | { contains: string; caseSensitive?: boolean }
+  | { containsAny: string[]; caseSensitive?: boolean }
+  | { containsAll: string[]; caseSensitive?: boolean }
+  | { pattern: string; caseSensitive?: boolean }
+  | { all: MatchCondition[]; caseSensitive?: boolean }
+  | { any: MatchCondition[]; caseSensitive?: boolean }
+  | { not: MatchCondition; caseSensitive?: boolean }
 
 export const matchConditionSchema: z.ZodType<MatchCondition> = z.lazy(() =>
   z.union([
-    z.object({ contains: z.string() }),
-    z.object({ containsAny: z.array(z.string()).min(1) }),
-    z.object({ containsAll: z.array(z.string()).min(1) }),
-    z.object({ pattern: z.string() }),
-    z.object({ all: z.array(matchConditionSchema).min(1) }),
-    z.object({ any: z.array(matchConditionSchema).min(1) }),
-    z.object({ not: matchConditionSchema }),
+    z.object({ contains: z.string(), caseSensitive: z.boolean().optional() }),
+    z.object({ containsAny: z.array(z.string()).min(1), caseSensitive: z.boolean().optional() }),
+    z.object({ containsAll: z.array(z.string()).min(1), caseSensitive: z.boolean().optional() }),
+    z.object({ pattern: z.string(), caseSensitive: z.boolean().optional() }),
+    z.object({ all: z.array(matchConditionSchema).min(1), caseSensitive: z.boolean().optional() }),
+    z.object({ any: z.array(matchConditionSchema).min(1), caseSensitive: z.boolean().optional() }),
+    z.object({ not: matchConditionSchema, caseSensitive: z.boolean().optional() }),
   ])
 )
 

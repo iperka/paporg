@@ -506,10 +506,15 @@ pub struct SimpleMatch {
     /// Match if text matches this regex pattern.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
+
+    /// Whether matching is case-sensitive. Default is false (case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_sensitive: Option<bool>,
 }
 
 /// A compound match condition.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompoundMatch {
     /// All conditions must match.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -522,6 +527,10 @@ pub struct CompoundMatch {
     /// Condition must not match.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not: Option<Box<MatchCondition>>,
+
+    /// Whether matching is case-sensitive for all children. Default is false (case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_sensitive: Option<bool>,
 }
 
 /// Output path settings.
