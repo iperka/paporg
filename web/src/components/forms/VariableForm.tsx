@@ -1,30 +1,20 @@
 import { TextField, SelectField, PatternField } from '@/components/form'
 import { type VariableSpec } from '@/schemas/resources'
+import type { FormInstance } from '@/lib/form-utils'
 
 interface VariableFormProps {
-  value: VariableSpec
-  onChange: (value: VariableSpec) => void
-  errors?: Record<string, string>
+  form: FormInstance
   isNew?: boolean
   name?: string
   onNameChange?: (name: string) => void
 }
 
 export function VariableForm({
-  value,
-  onChange,
-  errors = {},
+  form,
   isNew,
   name,
   onNameChange,
 }: VariableFormProps) {
-  const updateField = <K extends keyof VariableSpec>(
-    field: K,
-    fieldValue: VariableSpec[K]
-  ) => {
-    onChange({ ...value, [field]: fieldValue })
-  }
-
   return (
     <div className="space-y-6">
       {isNew && onNameChange && (
@@ -33,43 +23,48 @@ export function VariableForm({
           value={name || ''}
           onChange={onNameChange}
           description="Unique identifier for this variable (used in templates as $name)"
-          error={errors['name']}
           required
           placeholder="my_variable"
         />
       )}
 
-      <PatternField
-        label="Pattern"
-        value={value.pattern}
-        onChange={(v) => updateField('pattern', v)}
-        description="Regex pattern to extract value from document text. Use named groups like (?P<value>...)"
-        error={errors['pattern']}
-        required
-        placeholder="(?P<value>\w+)"
-      />
+      <form.Field name="pattern" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+        <PatternField
+          label="Pattern"
+          value={field.state.value}
+          onChange={field.handleChange}
+          description="Regex pattern to extract value from document text. Use named groups like (?P<value>...)"
+          error={field.state.meta.errors?.[0]}
+          required
+          placeholder="(?P<value>\w+)"
+        />
+      )} />
 
-      <SelectField
-        label="Transform"
-        value={value.transform || 'none'}
-        onChange={(v) => updateField('transform', v === 'none' ? undefined : v as VariableSpec['transform'])}
-        options={[
-          { value: 'none', label: 'None (keep as-is)' },
-          { value: 'slugify', label: 'Slugify (url-friendly)' },
-          { value: 'uppercase', label: 'Uppercase' },
-          { value: 'lowercase', label: 'Lowercase' },
-          { value: 'trim', label: 'Trim whitespace' },
-        ]}
-        description="Optional transformation to apply to extracted value"
-      />
+      <form.Field name="transform" children={(field: { state: { value: VariableSpec['transform']; meta: { errors: string[] } }; handleChange: (v: VariableSpec['transform']) => void }) => (
+        <SelectField
+          label="Transform"
+          value={field.state.value || 'none'}
+          onChange={(v: string) => field.handleChange(v === 'none' ? undefined : v as VariableSpec['transform'])}
+          options={[
+            { value: 'none', label: 'None (keep as-is)' },
+            { value: 'slugify', label: 'Slugify (url-friendly)' },
+            { value: 'uppercase', label: 'Uppercase' },
+            { value: 'lowercase', label: 'Lowercase' },
+            { value: 'trim', label: 'Trim whitespace' },
+          ]}
+          description="Optional transformation to apply to extracted value"
+        />
+      )} />
 
-      <TextField
-        label="Default Value"
-        value={value.default || ''}
-        onChange={(v) => updateField('default', v || undefined)}
-        description="Value to use if pattern doesn't match"
-        placeholder="unknown"
-      />
+      <form.Field name="default" children={(field: { state: { value: string | undefined; meta: { errors: string[] } }; handleChange: (v: string | undefined) => void }) => (
+        <TextField
+          label="Default Value"
+          value={field.state.value || ''}
+          onChange={(v: string) => field.handleChange(v || undefined)}
+          description="Value to use if pattern doesn't match"
+          placeholder="unknown"
+        />
+      )} />
     </div>
   )
 }

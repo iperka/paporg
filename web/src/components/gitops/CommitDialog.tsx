@@ -3,7 +3,8 @@ import { GitCommit, Loader2, Check, X, ChevronDown, ChevronRight, Sparkles } fro
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useGitCommit } from '@/mutations/use-gitops-mutations'
 import { useGitProgressContext } from '@/contexts/GitProgressContext'
 import { getPhaseLabel } from '@/types/gitops'
 import { cn } from '@/lib/utils'
@@ -15,7 +16,8 @@ interface CommitDialogProps {
 }
 
 export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
-  const { gitStatus, gitCommit, isLoading, error: contextError } = useGitOps()
+  const { data: gitStatus } = useGitStatus()
+  const gitCommitMut = useGitCommit()
   const { activeOperations } = useGitProgressContext()
 
   const [message, setMessage] = useState('')
@@ -49,8 +51,8 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
   const isFailed = currentProgress?.phase === 'failed'
   const isInProgress = Boolean(currentProgress && !isCompleted && !isFailed)
 
-  // Combine local validation errors with context errors
-  const error = localError || contextError || (isFailed ? currentProgress?.error : null)
+  // Combine local validation errors with progress errors
+  const error = localError || (isFailed ? currentProgress?.error : null)
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -68,7 +70,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
 
   // Watch for new commit operations starting
   useEffect(() => {
-    if (isLoading && !currentOperationId) {
+    if (gitCommitMut.isPending && !currentOperationId) {
       for (const [id, op] of activeOperations) {
         if (op.operationType === 'commit' && !currentOperationId) {
           setCurrentOperationId(id)
@@ -76,7 +78,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
         }
       }
     }
-  }, [isLoading, activeOperations, currentOperationId])
+  }, [gitCommitMut.isPending, activeOperations, currentOperationId])
 
   // Auto-close on success after a delay
   useEffect(() => {
@@ -179,7 +181,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
       ? undefined
       : Array.from(selectedFiles)
 
-    await gitCommit(message, files)
+    await gitCommitMut.mutateAsync({ message, files })
   }
 
   if (!open) return null
@@ -369,7 +371,7 @@ export function CommitDialog({ open, onOpenChange }: CommitDialogProps) {
               {isCompleted ? 'Close' : 'Cancel'}
             </Button>
             {!isCompleted && (
-              <Button type="submit" disabled={isLoading || isInProgress || !message.trim() || selectedFiles.size === 0}>
+              <Button type="submit" disabled={gitCommitMut.isPending || isInProgress || !message.trim() || selectedFiles.size === 0}>
                 {isInProgress ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -3,13 +3,14 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Variable, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { YamlEditor } from '@/components/ui/yaml-editor'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useResource } from '@/queries/use-resource'
+import { useUpdateResource, useCreateResource, useDeleteResource } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import { ResourcePanel } from '@/components/resource/ResourcePanel'
 import { VariableForm } from '@/components/forms/VariableForm'
 import { useAutoSave } from '@/hooks/useAutoSave'
+import { useForm, useStore } from '@tanstack/react-form'
 import {
-  type VariableSpec,
   type VariableResource,
   createDefaultVariableSpec,
   variableSpecSchema,
@@ -20,86 +21,79 @@ export function VariableEditPage() {
   const { name: urlName } = useParams({ from: '/variables/$name' })
   const { folder } = useSearch({ from: '/variables/$name' })
   const navigate = useNavigate()
-  const { fileTree, selectFile, selectedResource, updateResource, createResource, deleteResource, isLoading } = useGitOps()
   const { toast } = useToast()
 
   const isNew = urlName === 'new'
 
+  const { data: resourceData, isLoading: resourceLoading } = useResource('Variable', urlName, !isNew)
+  const updateResourceMut = useUpdateResource()
+  const createResourceMut = useCreateResource()
+  const deleteResourceMut = useDeleteResource()
+
+  const isLoading = resourceLoading || updateResourceMut.isPending || createResourceMut.isPending || deleteResourceMut.isPending
+
   const [resourceName, setResourceName] = useState('')
-  const [formData, setFormData] = useState<VariableSpec>(createDefaultVariableSpec())
+  const [initialName, setInitialName] = useState('')
   const [yamlContent, setYamlContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [initialData, setInitialData] = useState<{ name: string; spec: VariableSpec } | null>(null)
 
-  // Find and select the variable resource
-  useEffect(() => {
-    if (isNew) {
-      setFormData(createDefaultVariableSpec())
-      setResourceName('')
-      setInitialData(null)
-      return
-    }
+  // TanStack Form - zod schemas implement Standard Schema, no adapter needed
+  const form = useForm({
+    defaultValues: createDefaultVariableSpec(),
+    validators: {
+      onChange: variableSpecSchema,
+    },
+    onSubmit: async () => {
+      // Submit handled via handleSave
+    },
+  })
 
-    const findResourcePath = (node: typeof fileTree): string | null => {
-      if (!node) return null
-      if (node.resource?.kind === 'Variable' && node.resource.name === urlName) {
-        return node.path
-      }
-      for (const child of node.children) {
-        const found = findResourcePath(child)
-        if (found) return found
-      }
-      return null
-    }
-
-    const path = findResourcePath(fileTree)
-    if (path) {
-      selectFile(path)
-    }
-  }, [urlName, fileTree, selectFile, isNew])
+  // Subscribe to form state via the form's store
+  const formValues = useStore(form.store, (state) => state.values)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const canSubmit = useStore(form.store, (state) => state.canSubmit)
 
   // Parse the loaded resource
   useEffect(() => {
-    if (isNew || !selectedResource?.yaml) return
+    if (isNew) {
+      form.reset(createDefaultVariableSpec())
+      setResourceName('')
+      setInitialName('')
+      return
+    }
+
+    if (!resourceData?.yaml) return
 
     try {
-      const parsed = yaml.load(selectedResource.yaml) as VariableResource
+      const parsed = yaml.load(resourceData.yaml) as VariableResource
       if (parsed?.spec && parsed.kind === 'Variable') {
-        setFormData(parsed.spec)
+        form.reset(parsed.spec)
         setResourceName(parsed.metadata.name)
-        setYamlContent(selectedResource.yaml)
-        setInitialData({
-          name: parsed.metadata.name,
-          spec: JSON.parse(JSON.stringify(parsed.spec)),
-        })
+        setInitialName(parsed.metadata.name)
+        setYamlContent(resourceData.yaml)
         setError(null)
       }
     } catch {
       setError('Failed to parse variable YAML')
     }
-  }, [selectedResource, isNew])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourceData, isNew])
 
   // Check for unsaved changes
   const hasChanges = useMemo(() => {
     if (isNew) {
-      return resourceName.trim() !== '' || formData.pattern !== '(?P<value>\\w+)'
+      return resourceName.trim() !== '' || formValues.pattern !== '(?P<value>\\w+)'
     }
-    if (!initialData) return false
-
-    return (
-      resourceName !== initialData.name ||
-      JSON.stringify(formData) !== JSON.stringify(initialData.spec)
-    )
-  }, [formData, resourceName, initialData, isNew])
+    return isDirty || resourceName !== initialName
+  }, [formValues, resourceName, initialName, isNew, isDirty])
 
   // Check if form is valid for auto-save
   const isValidForSave = useMemo(() => {
     if (!resourceName.trim()) return false
     if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(resourceName)) return false
-    const validation = variableSpecSchema.safeParse(formData)
-    return validation.success
-  }, [resourceName, formData])
+    return canSubmit
+  }, [resourceName, canSubmit])
 
   // Sync form changes to YAML
   useEffect(() => {
@@ -110,13 +104,13 @@ export function VariableEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Variable',
         metadata: { name: resourceName || 'new_variable', labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       setYamlContent(yaml.dump(resource, { lineWidth: -1 }))
     } catch {
       // Ignore serialization errors while editing
     }
-  }, [formData, resourceName, isNew])
+  }, [formValues, resourceName, isNew])
 
   // Auto-save handler
   const handleAutoSave = useCallback(async () => {
@@ -126,24 +120,23 @@ export function VariableEditPage() {
       apiVersion: 'paporg.io/v1',
       kind: 'Variable',
       metadata: { name: resourceName, labels: {}, annotations: {} },
-      spec: formData,
+      spec: formValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-    const success = await updateResource('Variable', urlName, newYaml)
-    if (success) {
-      setInitialData({
-        name: resourceName,
-        spec: JSON.parse(JSON.stringify(formData)),
-      })
-    } else {
+    try {
+      await updateResourceMut.mutateAsync({ kind: 'Variable', name: urlName, yamlContent: newYaml })
+      // Reset form baseline after save (updates default values to current)
+      form.reset(formValues)
+      setInitialName(resourceName)
+    } catch {
       throw new Error('Failed to save')
     }
-  }, [isNew, isValidForSave, resourceName, formData, updateResource, urlName])
+  }, [isNew, isValidForSave, resourceName, formValues, updateResourceMut, urlName, form])
 
   // Auto-save hook
   const { status: autoSaveStatus, lastSaved, error: autoSaveError } = useAutoSave({
-    data: { resourceName, formData },
+    data: { resourceName, formValues },
     onSave: handleAutoSave,
     delay: 1500,
     enabled: !isNew && isValidForSave,
@@ -159,7 +152,9 @@ export function VariableEditPage() {
       if (parsed?.spec && parsed.kind === 'Variable') {
         const validated = variableSpecSchema.safeParse(parsed.spec)
         if (validated.success) {
-          setFormData(validated.data)
+          for (const [key, val] of Object.entries(validated.data)) {
+            form.setFieldValue(key as 'pattern' | 'transform' | 'default', val as never)
+          }
           if (parsed.metadata?.name) {
             setResourceName(parsed.metadata.name)
           }
@@ -173,7 +168,6 @@ export function VariableEditPage() {
 
   // Save handler
   const handleSave = async () => {
-    // Validate name
     if (!resourceName.trim()) {
       setError('Variable name is required')
       return
@@ -184,11 +178,8 @@ export function VariableEditPage() {
       return
     }
 
-    // Validate spec
-    const validation = variableSpecSchema.safeParse(formData)
-    if (!validation.success) {
-      const firstError = validation.error.errors[0]
-      setError(`Validation error: ${firstError.path.join('.')}: ${firstError.message}`)
+    if (!canSubmit) {
+      setError('Form has validation errors')
       return
     }
 
@@ -200,36 +191,28 @@ export function VariableEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Variable',
         metadata: { name: resourceName, labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      let success: boolean
       if (isNew) {
-        // If folder is provided, create the resource in that folder
         const targetPath = folder ? `${folder}/${resourceName}.yaml` : undefined
-        success = await createResource('Variable', newYaml, targetPath)
+        await createResourceMut.mutateAsync({ kind: 'Variable', yamlContent: newYaml, path: targetPath })
       } else {
-        success = await updateResource('Variable', urlName, newYaml)
+        await updateResourceMut.mutateAsync({ kind: 'Variable', name: urlName, yamlContent: newYaml })
       }
 
-      if (success) {
-        setInitialData({
-          name: resourceName,
-          spec: JSON.parse(JSON.stringify(formData)),
-        })
-        toast({
-          title: isNew ? 'Variable created' : 'Variable saved',
-          description: isNew
-            ? `Variable "${resourceName}" has been created.`
-            : 'Your changes have been saved.',
-        })
+      form.reset(formValues)
+      setInitialName(resourceName)
+      toast({
+        title: isNew ? 'Variable created' : 'Variable saved',
+        description: isNew
+          ? `Variable "${resourceName}" has been created.`
+          : 'Your changes have been saved.',
+      })
 
-        if (isNew) {
-          navigate({ to: '/variables/$name', params: { name: resourceName } })
-        }
-      } else {
-        setError(isNew ? 'Failed to create variable' : 'Failed to save variable')
+      if (isNew) {
+        navigate({ to: '/variables/$name', params: { name: resourceName } })
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save variable')
@@ -247,16 +230,12 @@ export function VariableEditPage() {
 
     setIsSaving(true)
     try {
-      const success = await deleteResource('Variable', urlName)
-      if (success) {
-        toast({
-          title: 'Variable deleted',
-          description: `Variable "${urlName}" has been deleted.`,
-        })
-        navigate({ to: '/variables' })
-      } else {
-        setError('Failed to delete variable')
-      }
+      await deleteResourceMut.mutateAsync({ kind: 'Variable', name: urlName })
+      toast({
+        title: 'Variable deleted',
+        description: `Variable "${urlName}" has been deleted.`,
+      })
+      navigate({ to: '/variables' })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete variable')
     } finally {
@@ -297,8 +276,7 @@ export function VariableEditPage() {
         lastSaved={lastSaved}
         formContent={
           <VariableForm
-            value={formData}
-            onChange={setFormData}
+            form={form}
             isNew={isNew}
             name={resourceName}
             onNameChange={setResourceName}

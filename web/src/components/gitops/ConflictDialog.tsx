@@ -3,7 +3,8 @@ import { AlertTriangle, GitBranch, Loader2, FileWarning, ExternalLink } from 'lu
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useSettings } from '@/queries/use-settings'
+import { useCreateBranch, useGitCommit } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import type { InitializeResult } from '@/types/gitops'
 
@@ -14,13 +15,17 @@ interface ConflictDialogProps {
 }
 
 export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogProps) {
-  const { createBranch, gitCommit, settings, isLoading } = useGitOps()
+  const { data: settings } = useSettings()
+  const createBranchMut = useCreateBranch()
+  const gitCommitMut = useGitCommit()
   const { toast } = useToast()
   const [branchName, setBranchName] = useState(() => {
     const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     return `local-changes-${timestamp}`
   })
   const [isCreating, setIsCreating] = useState(false)
+
+  const isLoading = createBranchMut.isPending || gitCommitMut.isPending
 
   if (!open || !result) return null
 
@@ -38,28 +43,20 @@ export function ConflictDialog({ open, onOpenChange, result }: ConflictDialogPro
 
     try {
       // First, commit any local changes
-      const commitSuccess = await gitCommit(`Save local changes before merge (branch: ${branchName})`)
-
-      if (!commitSuccess) {
+      try {
+        await gitCommitMut.mutateAsync({ message: `Save local changes before merge (branch: ${branchName})` })
+      } catch {
         // No changes to commit is fine, continue
       }
 
       // Create new branch with local changes
-      const success = await createBranch(branchName)
+      await createBranchMut.mutateAsync({ name: branchName })
 
-      if (success) {
-        toast({
-          title: 'Branch created',
-          description: `Your local changes have been saved to branch "${branchName}".`,
-        })
-        onOpenChange(false)
-      } else {
-        toast({
-          title: 'Failed to create branch',
-          description: 'Could not create the branch. Check the logs for details.',
-          variant: 'destructive',
-        })
-      }
+      toast({
+        title: 'Branch created',
+        description: `Your local changes have been saved to branch "${branchName}".`,
+      })
+      onOpenChange(false)
     } catch (error) {
       toast({
         title: 'Error',

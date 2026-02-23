@@ -2,7 +2,7 @@ import { Outlet } from '@tanstack/react-router'
 import { Toaster } from '@/components/ui/toaster'
 import { Header } from '@/components/layout/Header'
 import { AppSidebar } from '@/components/layout/AppSidebar'
-import { GitOpsProvider } from '@/contexts/GitOpsContext'
+import { SelectedFileProvider } from '@/contexts/SelectedFileContext'
 import { GitProgressProvider } from '@/contexts/GitProgressContext'
 import { JobsProvider } from '@/contexts/JobsContext'
 import { SseProvider } from '@/contexts/SseContext'
@@ -11,9 +11,11 @@ import { ConflictDialog } from '@/components/gitops/ConflictDialog'
 import { useState } from 'react'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { ThemeProvider } from '@/components/theme-provider'
+import { useConfigChangeInvalidation } from '@/hooks/use-config-change-invalidation'
 import type { InitializeResult } from '@/types/gitops'
 
 export function RootLayout() {
+  useConfigChangeInvalidation()
   const [showConflictDialog, setShowConflictDialog] = useState(false)
   const [conflictResult, setConflictResult] = useState<InitializeResult | null>(null)
 
@@ -27,7 +29,7 @@ export function RootLayout() {
       <SseProvider>
         <GitProgressProvider>
           <JobsProvider>
-            <GitOpsProvider>
+            <SelectedFileProvider>
               <SidebarProvider defaultOpen={true}>
                 <AppSidebar />
                 <SidebarInset className="bg-white/70 dark:bg-neutral-900/70">
@@ -47,7 +49,7 @@ export function RootLayout() {
                 />
                 <Toaster />
               </SidebarProvider>
-            </GitOpsProvider>
+            </SelectedFileProvider>
           </JobsProvider>
         </GitProgressProvider>
       </SseProvider>

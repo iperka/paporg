@@ -3,18 +3,20 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { FileText, ArrowLeft, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { YamlEditor } from '@/components/ui/yaml-editor'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useResource } from '@/queries/use-resource'
+import { useUpdateResource, useCreateResource, useDeleteResource } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import { ResourcePanel } from '@/components/resource/ResourcePanel'
 import { RuleForm } from '@/components/forms/RuleForm'
 import { ShareRuleDialog } from '@/components/rules/ShareRuleDialog'
 import { useAutoSave } from '@/hooks/useAutoSave'
+import { useForm, useStore } from '@tanstack/react-form'
 import {
-  type RuleSpec,
   type RuleResource,
   createDefaultRuleSpec,
   ruleSpecSchema,
 } from '@/schemas/resources'
+import { zodFormValidator } from '@/lib/form-utils'
 import { trackEvent } from '@/utils/analytics'
 import { buildRuleShareText } from '@/utils/ruleShare'
 import yaml from 'js-yaml'
@@ -23,87 +25,83 @@ export function RuleEditPage() {
   const { name: urlName } = useParams({ from: '/rules/$name' })
   const { folder } = useSearch({ from: '/rules/$name' })
   const navigate = useNavigate()
-  const { fileTree, selectFile, selectedResource, updateResource, createResource, deleteResource, isLoading } = useGitOps()
   const { toast } = useToast()
 
   const isNew = urlName === 'new'
 
+  // Load resource directly via useResource for non-new resources
+  const { data: resourceData, isLoading: isResourceLoading } = useResource('Rule', urlName, !isNew)
+
+  // Mutations
+  const updateResourceMut = useUpdateResource()
+  const createResourceMut = useCreateResource()
+  const deleteResourceMut = useDeleteResource()
+
+  const isLoading = isResourceLoading || updateResourceMut.isPending || createResourceMut.isPending || deleteResourceMut.isPending
+
   const [resourceName, setResourceName] = useState('')
-  const [formData, setFormData] = useState<RuleSpec>(createDefaultRuleSpec())
+  const [initialName, setInitialName] = useState('')
   const [yamlContent, setYamlContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [initialData, setInitialData] = useState<{ name: string; spec: RuleSpec } | null>(null)
   const [isShareOpen, setIsShareOpen] = useState(false)
 
-  // Find and select the rule resource
-  useEffect(() => {
-    if (isNew) {
-      setFormData(createDefaultRuleSpec())
-      setResourceName('')
-      setInitialData(null)
-      return
-    }
+  // TanStack Form - use function validator for Zod schemas with .default() fields
+  const form = useForm({
+    defaultValues: createDefaultRuleSpec(),
+    validators: {
+      onChange: zodFormValidator(ruleSpecSchema),
+    },
+    onSubmit: async () => {
+      // Submit handled via handleSave
+    },
+  })
 
-    const findResourcePath = (node: typeof fileTree): string | null => {
-      if (!node) return null
-      if (node.resource?.kind === 'Rule' && node.resource.name === urlName) {
-        return node.path
-      }
-      for (const child of node.children) {
-        const found = findResourcePath(child)
-        if (found) return found
-      }
-      return null
-    }
-
-    const path = findResourcePath(fileTree)
-    if (path) {
-      selectFile(path)
-    }
-  }, [urlName, fileTree, selectFile, isNew])
+  // Subscribe to form state via the form's store
+  const formValues = useStore(form.store, (state) => state.values)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const canSubmit = useStore(form.store, (state) => state.canSubmit)
 
   // Parse the loaded resource
   useEffect(() => {
-    if (isNew || !selectedResource?.yaml) return
+    if (isNew) {
+      form.reset(createDefaultRuleSpec())
+      setResourceName('')
+      setInitialName('')
+      return
+    }
+
+    if (!resourceData?.yaml) return
 
     try {
-      const parsed = yaml.load(selectedResource.yaml) as RuleResource
+      const parsed = yaml.load(resourceData.yaml) as RuleResource
       if (parsed?.spec && parsed.kind === 'Rule') {
-        setFormData(parsed.spec)
+        form.reset(parsed.spec)
         setResourceName(parsed.metadata.name)
-        setYamlContent(selectedResource.yaml)
-        setInitialData({
-          name: parsed.metadata.name,
-          spec: JSON.parse(JSON.stringify(parsed.spec)),
-        })
+        setInitialName(parsed.metadata.name)
+        setYamlContent(resourceData.yaml)
         setError(null)
       }
     } catch {
       setError('Failed to parse rule YAML')
     }
-  }, [selectedResource, isNew])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourceData, isNew])
 
   // Check for unsaved changes
   const hasChanges = useMemo(() => {
     if (isNew) {
-      return resourceName.trim() !== '' || formData.category !== ''
+      return resourceName.trim() !== '' || formValues.category !== ''
     }
-    if (!initialData) return false
-
-    return (
-      resourceName !== initialData.name ||
-      JSON.stringify(formData) !== JSON.stringify(initialData.spec)
-    )
-  }, [formData, resourceName, initialData, isNew])
+    return isDirty || resourceName !== initialName
+  }, [formValues, resourceName, initialName, isNew, isDirty])
 
   // Check if form is valid for auto-save
   const isValidForSave = useMemo(() => {
     if (!resourceName.trim()) return false
     if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(resourceName)) return false
-    const validation = ruleSpecSchema.safeParse(formData)
-    return validation.success
-  }, [resourceName, formData])
+    return canSubmit
+  }, [resourceName, canSubmit])
 
   const canShare = !isNew && resourceName.trim().length > 0
   const shareText = useMemo(
@@ -120,13 +118,13 @@ export function RuleEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Rule',
         metadata: { name: resourceName || 'new_rule', labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       setYamlContent(yaml.dump(resource, { lineWidth: -1 }))
     } catch {
       // Ignore serialization errors while editing
     }
-  }, [formData, resourceName, isNew])
+  }, [formValues, resourceName, isNew])
 
   // Auto-save handler
   const handleAutoSave = useCallback(async () => {
@@ -136,24 +134,24 @@ export function RuleEditPage() {
       apiVersion: 'paporg.io/v1',
       kind: 'Rule',
       metadata: { name: resourceName, labels: {}, annotations: {} },
-      spec: formData,
+      spec: formValues,
     }
     const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-    const success = await updateResource('Rule', urlName, newYaml)
-    if (success) {
-      setInitialData({
-        name: resourceName,
-        spec: JSON.parse(JSON.stringify(formData)),
-      })
-    } else {
+    try {
+      await updateResourceMut.mutateAsync({ kind: 'Rule', name: urlName, yamlContent: newYaml })
+      // Reset form baseline after save (updates default values to current)
+      form.reset(formValues)
+      setInitialName(resourceName)
+    } catch {
       throw new Error('Failed to save')
     }
-  }, [isNew, isValidForSave, resourceName, formData, updateResource, urlName])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, isValidForSave, resourceName, formValues, updateResourceMut, urlName])
 
   // Auto-save hook
   const { status: autoSaveStatus, lastSaved, error: autoSaveError } = useAutoSave({
-    data: { resourceName, formData },
+    data: { resourceName, formValues },
     onSave: handleAutoSave,
     delay: 1500,
     enabled: !isNew && isValidForSave,
@@ -169,7 +167,10 @@ export function RuleEditPage() {
       if (parsed?.spec && parsed.kind === 'Rule') {
         const validated = ruleSpecSchema.safeParse(parsed.spec)
         if (validated.success) {
-          setFormData(validated.data)
+          for (const [key, val] of Object.entries(validated.data)) {
+            // @ts-expect-error TS2589: DeepKeys<RuleSpec> infinite recursion from recursive MatchCondition
+            form.setFieldValue(key, val)
+          }
           if (parsed.metadata?.name) {
             setResourceName(parsed.metadata.name)
           }
@@ -194,11 +195,8 @@ export function RuleEditPage() {
       return
     }
 
-    // Validate spec
-    const validation = ruleSpecSchema.safeParse(formData)
-    if (!validation.success) {
-      const firstError = validation.error.errors[0]
-      setError(`Validation error: ${firstError.path.join('.')}: ${firstError.message}`)
+    if (!canSubmit) {
+      setError('Form has validation errors')
       return
     }
 
@@ -210,39 +208,31 @@ export function RuleEditPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Rule',
         metadata: { name: resourceName, labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      let success: boolean
       if (isNew) {
-        // If folder is provided, create the resource in that folder
         const targetPath = folder ? `${folder}/${resourceName}.yaml` : undefined
-        success = await createResource('Rule', newYaml, targetPath)
+        await createResourceMut.mutateAsync({ kind: 'Rule', yamlContent: newYaml, path: targetPath })
       } else {
-        success = await updateResource('Rule', urlName, newYaml)
+        await updateResourceMut.mutateAsync({ kind: 'Rule', name: urlName, yamlContent: newYaml })
       }
 
-      if (success) {
-        setInitialData({
-          name: resourceName,
-          spec: JSON.parse(JSON.stringify(formData)),
-        })
-        toast({
-          title: isNew ? 'Rule created' : 'Rule saved',
-          description: isNew
-            ? `Rule "${resourceName}" has been created.`
-            : 'Your changes have been saved.',
-        })
+      form.reset(formValues)
+      setInitialName(resourceName)
+      toast({
+        title: isNew ? 'Rule created' : 'Rule saved',
+        description: isNew
+          ? `Rule "${resourceName}" has been created.`
+          : 'Your changes have been saved.',
+      })
 
-        if (isNew) {
-          navigate({ to: '/rules/$name', params: { name: resourceName } })
-        }
-      } else {
-        setError(isNew ? 'Failed to create rule' : 'Failed to save rule')
+      if (isNew) {
+        navigate({ to: '/rules/$name', params: { name: resourceName } })
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save rule')
+      setError(e instanceof Error ? e.message : isNew ? 'Failed to create rule' : 'Failed to save rule')
     } finally {
       setIsSaving(false)
     }
@@ -257,16 +247,12 @@ export function RuleEditPage() {
 
     setIsSaving(true)
     try {
-      const success = await deleteResource('Rule', urlName)
-      if (success) {
-        toast({
-          title: 'Rule deleted',
-          description: `Rule "${urlName}" has been deleted.`,
-        })
-        navigate({ to: '/rules' })
-      } else {
-        setError('Failed to delete rule')
-      }
+      await deleteResourceMut.mutateAsync({ kind: 'Rule', name: urlName })
+      toast({
+        title: 'Rule deleted',
+        description: `Rule "${urlName}" has been deleted.`,
+      })
+      navigate({ to: '/rules' })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete rule')
     } finally {
@@ -358,8 +344,7 @@ export function RuleEditPage() {
         lastSaved={lastSaved}
         formContent={
           <RuleForm
-            value={formData}
-            onChange={setFormData}
+            form={form}
             isNew={isNew}
             name={resourceName}
             onNameChange={setResourceName}

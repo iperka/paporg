@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { AlertTriangle, GitBranch, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useSettings } from '@/queries/use-settings'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useInitializeGit } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import type { InitializeResult } from '@/types/gitops'
 
@@ -10,9 +13,24 @@ interface GitInitializeBannerProps {
 }
 
 export function GitInitializeBanner({ onConflicts }: GitInitializeBannerProps) {
-  const { needsInitialization, initializeGit, settings, isLoading, error: contextError } = useGitOps()
+  const { data: settings, isLoading: settingsLoading } = useSettings()
+  const { data: gitStatus, isLoading: gitStatusLoading } = useGitStatus()
+  const { data: fileTree } = useFileTree()
+  const initializeGitMut = useInitializeGit()
   const { toast } = useToast()
   const [isInitializing, setIsInitializing] = useState(false)
+
+  const isLoading = settingsLoading || gitStatusLoading
+
+  // Replicate the needsInitialization logic from GitOpsContext
+  const initialLoadComplete = fileTree !== null || gitStatus !== null
+  const needsInitialization = Boolean(
+    initialLoadComplete &&
+    settings?.spec.git.enabled &&
+    settings?.spec.git.repository &&
+    gitStatus &&
+    !gitStatus.isRepo,
+  )
 
   if (!needsInitialization) {
     return null
@@ -22,7 +40,7 @@ export function GitInitializeBanner({ onConflicts }: GitInitializeBannerProps) {
     setIsInitializing(true)
 
     try {
-      const result = await initializeGit()
+      const result = await initializeGitMut.mutateAsync()
 
       if (result) {
         if (result.conflictingFiles.length > 0) {
@@ -44,12 +62,6 @@ export function GitInitializeBanner({ onConflicts }: GitInitializeBannerProps) {
             description: result.message,
           })
         }
-      } else {
-        toast({
-          title: 'Initialization failed',
-          description: contextError || 'Failed to initialize git repository. Check the logs for details.',
-          variant: 'destructive',
-        })
       }
     } catch (error) {
       toast({

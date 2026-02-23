@@ -7,52 +7,23 @@ import {
 import { TextField, NumberField, ArrayField } from '@/components/form'
 import { Label } from '@/components/ui/label'
 import { MatchConditionBuilder } from './MatchConditionBuilder'
-import { type RuleSpec } from '@/schemas/resources'
+import { type MatchCondition, type SymlinkSettings } from '@/schemas/resources'
 import { Filter, FileOutput, Link2, Settings } from 'lucide-react'
+import type { FormInstance } from '@/lib/form-utils'
 
 interface RuleFormProps {
-  value: RuleSpec
-  onChange: (value: RuleSpec) => void
-  errors?: Record<string, string>
+  form: FormInstance
   isNew?: boolean
   name?: string
   onNameChange?: (name: string) => void
 }
 
 export function RuleForm({
-  value,
-  onChange,
-  errors = {},
+  form,
   isNew,
   name,
   onNameChange,
 }: RuleFormProps) {
-  const updateField = <K extends keyof RuleSpec>(
-    field: K,
-    fieldValue: RuleSpec[K]
-  ) => {
-    onChange({ ...value, [field]: fieldValue })
-  }
-
-  const updateOutput = <K extends keyof RuleSpec['output']>(
-    field: K,
-    fieldValue: RuleSpec['output'][K]
-  ) => {
-    onChange({
-      ...value,
-      output: { ...value.output, [field]: fieldValue },
-    })
-  }
-
-  const handleSymlinksChange = (targets: string[]) => {
-    const symlinks = targets
-      .filter((t) => t.trim() !== '')
-      .map((target) => ({ target }))
-    updateField('symlinks', symlinks)
-  }
-
-  const symlinkTargets = (value.symlinks || []).map((s) => s.target)
-
   return (
     <Accordion type="multiple" defaultValue={['basic', 'match', 'output']} className="w-full">
       {/* Basic Settings */}
@@ -71,29 +42,32 @@ export function RuleForm({
                 value={name || ''}
                 onChange={onNameChange}
                 description="Unique identifier for this rule"
-                error={errors['name']}
                 required
                 placeholder="my_rule"
               />
             )}
 
-            <TextField
-              label="Category"
-              value={value.category}
-              onChange={(v) => updateField('category', v)}
-              description="Category for this rule (used for organization)"
-              error={errors['category']}
-              required
-              placeholder="invoices"
-            />
+            <form.Field name="category" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <TextField
+                label="Category"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Category for this rule (used for organization)"
+                error={field.state.meta.errors?.[0]}
+                required
+                placeholder="invoices"
+              />
+            )} />
 
-            <NumberField
-              label="Priority"
-              value={value.priority}
-              onChange={(v) => updateField('priority', v)}
-              description="Higher priority rules are matched first (default: 0)"
-              error={errors['priority']}
-            />
+            <form.Field name="priority" children={(field: { state: { value: number; meta: { errors: string[] } }; handleChange: (v: number) => void }) => (
+              <NumberField
+                label="Priority"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Higher priority rules are matched first (default: 0)"
+                error={field.state.meta.errors?.[0]}
+              />
+            )} />
           </div>
         </AccordionContent>
       </AccordionItem>
@@ -114,10 +88,12 @@ export function RuleForm({
                 Define conditions that must match for this rule to apply. Use simple conditions
                 (contains, pattern) or combine them with AND/OR/NOT logic.
               </p>
-              <MatchConditionBuilder
-                condition={value.match}
-                onChange={(match) => updateField('match', match)}
-              />
+              <form.Field name="match" children={(field: { state: { value: MatchCondition; meta: { errors: string[] } }; handleChange: (v: MatchCondition) => void }) => (
+                <MatchConditionBuilder
+                  condition={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )} />
             </div>
           </div>
         </AccordionContent>
@@ -133,27 +109,31 @@ export function RuleForm({
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <TextField
-              label="Output Directory"
-              value={value.output.directory}
-              onChange={(v) => updateOutput('directory', v)}
-              description="Output directory template. Variables: $y (year), $m (month), $category, custom variables"
-              error={errors['output.directory']}
-              required
-              mono
-              placeholder="$y/$category"
-            />
+            <form.Field name="output.directory" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <TextField
+                label="Output Directory"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Output directory template. Variables: $y (year), $m (month), $category, custom variables"
+                error={field.state.meta.errors?.[0]}
+                required
+                mono
+                placeholder="$y/$category"
+              />
+            )} />
 
-            <TextField
-              label="Filename"
-              value={value.output.filename}
-              onChange={(v) => updateOutput('filename', v)}
-              description="Filename template. Variables: $original, $timestamp, custom variables"
-              error={errors['output.filename']}
-              required
-              mono
-              placeholder="$original"
-            />
+            <form.Field name="output.filename" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <TextField
+                label="Filename"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Filename template. Variables: $original, $timestamp, custom variables"
+                error={field.state.meta.errors?.[0]}
+                required
+                mono
+                placeholder="$original"
+              />
+            )} />
           </div>
         </AccordionContent>
       </AccordionItem>
@@ -164,24 +144,30 @@ export function RuleForm({
           <div className="flex items-center gap-2">
             <Link2 className="h-4 w-4" />
             Symlinks
-            {symlinkTargets.length > 0 && (
-              <span className="text-xs text-muted-foreground">
-                ({symlinkTargets.length})
-              </span>
-            )}
           </div>
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <ArrayField
-              label="Symlink Targets"
-              values={symlinkTargets.length > 0 ? symlinkTargets : []}
-              onChange={handleSymlinksChange}
-              description="Additional locations to create symlinks to the output file"
-              placeholder="$y/all_documents"
-              addLabel="Add Symlink"
-              mono
-            />
+            <form.Field name="symlinks" children={(field: { state: { value: SymlinkSettings[]; meta: { errors: string[] } }; handleChange: (v: SymlinkSettings[]) => void }) => {
+              const symlinkTargets = (field.state.value || []).map((s: SymlinkSettings) => s.target)
+              return (
+                <ArrayField
+                  label="Symlink Targets"
+                  values={symlinkTargets.length > 0 ? symlinkTargets : []}
+                  onChange={(targets: string[]) => {
+                    const symlinks = targets
+                      .filter((t) => t.trim() !== '')
+                      .map((target) => ({ target }))
+                    field.handleChange(symlinks)
+                  }}
+                  description="Additional locations to create symlinks to the output file"
+                  error={field.state.meta.errors?.[0]}
+                  placeholder="$y/all_documents"
+                  addLabel="Add Symlink"
+                  mono
+                />
+              )
+            }} />
           </div>
         </AccordionContent>
       </AccordionItem>

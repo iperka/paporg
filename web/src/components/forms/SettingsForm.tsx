@@ -5,73 +5,19 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { TextField, NumberField, SwitchField, SelectField, ArrayField, SecretField, PathField } from '@/components/form'
-import { type SettingsSpec } from '@/schemas/resources'
 import { Folder, Eye, GitBranch, Settings as SettingsIcon } from 'lucide-react'
+import { useStore } from '@tanstack/react-form'
+import type { FormInstance } from '@/lib/form-utils'
 
 interface SettingsFormProps {
-  value: SettingsSpec
-  onChange: (value: SettingsSpec) => void
-  errors?: Record<string, string>
+  form: FormInstance
 }
 
-export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps) {
-  const updateField = <K extends keyof SettingsSpec>(
-    field: K,
-    fieldValue: SettingsSpec[K]
-  ) => {
-    onChange({ ...value, [field]: fieldValue })
-  }
-
-  const updateOcr = <K extends keyof SettingsSpec['ocr']>(
-    field: K,
-    fieldValue: SettingsSpec['ocr'][K]
-  ) => {
-    onChange({
-      ...value,
-      ocr: { ...value.ocr, [field]: fieldValue },
-    })
-  }
-
-  const updateDefaults = <K extends keyof SettingsSpec['defaults']['output']>(
-    field: K,
-    fieldValue: SettingsSpec['defaults']['output'][K]
-  ) => {
-    onChange({
-      ...value,
-      defaults: {
-        ...value.defaults,
-        output: { ...value.defaults.output, [field]: fieldValue },
-      },
-    })
-  }
-
-  const updateGit = <K extends keyof SettingsSpec['git']>(
-    field: K,
-    fieldValue: SettingsSpec['git'][K]
-  ) => {
-    onChange({
-      ...value,
-      git: { ...value.git, [field]: fieldValue },
-    })
-  }
-
-  const updateGitAuth = <K extends keyof SettingsSpec['git']['auth']>(
-    field: K,
-    fieldValue: SettingsSpec['git']['auth'][K] | undefined,
-    clearField?: keyof SettingsSpec['git']['auth']
-  ) => {
-    const updates: Partial<SettingsSpec['git']['auth']> = { [field]: fieldValue }
-    if (clearField) {
-      updates[clearField] = undefined
-    }
-    onChange({
-      ...value,
-      git: {
-        ...value.git,
-        auth: { ...value.git.auth, ...updates },
-      },
-    })
-  }
+export function SettingsForm({ form }: SettingsFormProps) {
+  // Subscribe to conditional-rendering values at the top level
+  const ocrEnabled: boolean = useStore(form.store, (state) => state.values.ocr.enabled)
+  const gitEnabled: boolean = useStore(form.store, (state) => state.values.git.enabled)
+  const gitAuthType: string = useStore(form.store, (state) => state.values.git.auth.type)
 
   return (
     <Accordion type="multiple" defaultValue={['general', 'ocr', 'defaults']} className="w-full">
@@ -85,33 +31,39 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <PathField
-              label="Input Directory"
-              value={value.inputDirectory}
-              onChange={(v) => updateField('inputDirectory', v)}
-              description="Directory to watch for incoming documents"
-              error={errors['inputDirectory']}
-              required
-              mode="folder"
-            />
-            <PathField
-              label="Output Directory"
-              value={value.outputDirectory}
-              onChange={(v) => updateField('outputDirectory', v)}
-              description="Base directory for organized documents"
-              error={errors['outputDirectory']}
-              required
-              mode="folder"
-            />
-            <NumberField
-              label="Worker Count"
-              value={value.workerCount}
-              onChange={(v) => updateField('workerCount', v)}
-              description="Number of parallel document processing workers"
-              error={errors['workerCount']}
-              min={1}
-              max={32}
-            />
+            <form.Field name="inputDirectory" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <PathField
+                label="Input Directory"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Directory to watch for incoming documents"
+                error={field.state.meta.errors?.[0]}
+                required
+                mode="folder"
+              />
+            )} />
+            <form.Field name="outputDirectory" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <PathField
+                label="Output Directory"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Base directory for organized documents"
+                error={field.state.meta.errors?.[0]}
+                required
+                mode="folder"
+              />
+            )} />
+            <form.Field name="workerCount" children={(field: { state: { value: number; meta: { errors: string[] } }; handleChange: (v: number) => void }) => (
+              <NumberField
+                label="Worker Count"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Number of parallel document processing workers"
+                error={field.state.meta.errors?.[0]}
+                min={1}
+                max={32}
+              />
+            )} />
           </div>
         </AccordionContent>
       </AccordionItem>
@@ -126,33 +78,39 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <SwitchField
-              label="Enable OCR"
-              checked={value.ocr.enabled}
-              onChange={(v) => updateOcr('enabled', v)}
-              description="Extract text from scanned documents and images"
-            />
-            {value.ocr.enabled && (
+            <form.Field name="ocr.enabled" children={(field: { state: { value: boolean; meta: { errors: string[] } }; handleChange: (v: boolean) => void }) => (
+              <SwitchField
+                label="Enable OCR"
+                checked={field.state.value}
+                onChange={field.handleChange}
+                description="Extract text from scanned documents and images"
+              />
+            )} />
+            {ocrEnabled && (
               <>
-                <ArrayField
-                  label="Languages"
-                  values={value.ocr.languages}
-                  onChange={(v) => updateOcr('languages', v)}
-                  description="OCR language codes (e.g., eng, deu, fra)"
-                  error={errors['ocr.languages']}
-                  placeholder="Enter language code..."
-                  addLabel="Add Language"
-                  minItems={1}
-                />
-                <NumberField
-                  label="DPI"
-                  value={value.ocr.dpi}
-                  onChange={(v) => updateOcr('dpi', v)}
-                  description="Resolution for OCR processing (higher = more accurate but slower)"
-                  error={errors['ocr.dpi']}
-                  min={72}
-                  max={600}
-                />
+                <form.Field name="ocr.languages" children={(field: { state: { value: string[]; meta: { errors: string[] } }; handleChange: (v: string[]) => void }) => (
+                  <ArrayField
+                    label="Languages"
+                    values={field.state.value}
+                    onChange={field.handleChange}
+                    description="OCR language codes (e.g., eng, deu, fra)"
+                    error={field.state.meta.errors?.[0]}
+                    placeholder="Enter language code..."
+                    addLabel="Add Language"
+                    minItems={1}
+                  />
+                )} />
+                <form.Field name="ocr.dpi" children={(field: { state: { value: number; meta: { errors: string[] } }; handleChange: (v: number) => void }) => (
+                  <NumberField
+                    label="DPI"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="Resolution for OCR processing (higher = more accurate but slower)"
+                    error={field.state.meta.errors?.[0]}
+                    min={72}
+                    max={600}
+                  />
+                )} />
               </>
             )}
           </div>
@@ -169,24 +127,28 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <TextField
-              label="Default Directory Template"
-              value={value.defaults.output.directory}
-              onChange={(v) => updateDefaults('directory', v)}
-              description="Output directory when no rule matches. Supports variables like $y (year), $m (month)"
-              error={errors['defaults.output.directory']}
-              required
-              mono
-            />
-            <TextField
-              label="Default Filename Template"
-              value={value.defaults.output.filename}
-              onChange={(v) => updateDefaults('filename', v)}
-              description="Filename template. Use $original for original filename, $timestamp for date"
-              error={errors['defaults.output.filename']}
-              required
-              mono
-            />
+            <form.Field name="defaults.output.directory" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <TextField
+                label="Default Directory Template"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Output directory when no rule matches. Supports variables like $y (year), $m (month)"
+                error={field.state.meta.errors?.[0]}
+                required
+                mono
+              />
+            )} />
+            <form.Field name="defaults.output.filename" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+              <TextField
+                label="Default Filename Template"
+                value={field.state.value}
+                onChange={field.handleChange}
+                description="Filename template. Use $original for original filename, $timestamp for date"
+                error={field.state.meta.errors?.[0]}
+                required
+                mono
+              />
+            )} />
           </div>
         </AccordionContent>
       </AccordionItem>
@@ -201,83 +163,113 @@ export function SettingsForm({ value, onChange, errors = {} }: SettingsFormProps
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-4 pt-4">
-            <SwitchField
-              label="Enable Git Sync"
-              checked={value.git.enabled}
-              onChange={(v) => updateGit('enabled', v)}
-              description="Sync configuration with a Git repository"
-            />
-            {value.git.enabled && (
+            <form.Field name="git.enabled" children={(field: { state: { value: boolean; meta: { errors: string[] } }; handleChange: (v: boolean) => void }) => (
+              <SwitchField
+                label="Enable Git Sync"
+                checked={field.state.value}
+                onChange={field.handleChange}
+                description="Sync configuration with a Git repository"
+              />
+            )} />
+            {gitEnabled && (
               <>
-                <TextField
-                  label="Repository URL"
-                  value={value.git.repository}
-                  onChange={(v) => updateGit('repository', v)}
-                  description="Git repository URL (HTTPS or SSH)"
-                  error={errors['git.repository']}
-                  mono
-                />
-                <TextField
-                  label="Branch"
-                  value={value.git.branch}
-                  onChange={(v) => updateGit('branch', v)}
-                  description="Git branch to use"
-                  error={errors['git.branch']}
-                />
-                <NumberField
-                  label="Sync Interval (seconds)"
-                  value={value.git.syncInterval}
-                  onChange={(v) => updateGit('syncInterval', v)}
-                  description="How often to sync with remote (0 to disable auto-sync)"
-                  error={errors['git.syncInterval']}
-                  min={0}
-                />
-                <TextField
-                  label="User Name"
-                  value={value.git.userName}
-                  onChange={(v) => updateGit('userName', v)}
-                  description="Git user name for commits"
-                  error={errors['git.userName']}
-                />
-                <TextField
-                  label="User Email"
-                  value={value.git.userEmail}
-                  onChange={(v) => updateGit('userEmail', v)}
-                  description="Git user email for commits"
-                  error={errors['git.userEmail']}
-                />
-                <SelectField
-                  label="Authentication Type"
-                  value={value.git.auth.type}
-                  onChange={(v) => updateGitAuth('type', v as 'none' | 'token' | 'ssh-key')}
-                  options={[
-                    { value: 'none', label: 'None (public repo or SSH agent)' },
-                    { value: 'ssh-key', label: 'SSH Key File' },
-                    { value: 'token', label: 'Access Token' },
-                  ]}
-                  description="SSH agent keys are used automatically when 'None' is selected"
-                />
-                {value.git.auth.type === 'token' && (
-                  <SecretField
-                    label="Git Token"
-                    sourceName="git"
-                    secretType="token"
-                    filePath={value.git.auth.tokenFile}
-                    envVar={value.git.auth.tokenEnvVar}
-                    onFilePathChange={(v) => updateGitAuth('tokenFile', v, 'tokenEnvVar')}
-                    onEnvVarChange={(v) => updateGitAuth('tokenEnvVar', v, 'tokenFile')}
-                    description="Personal access token for Git authentication"
+                <form.Field name="git.repository" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                  <TextField
+                    label="Repository URL"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="Git repository URL (HTTPS or SSH)"
+                    error={field.state.meta.errors?.[0]}
+                    mono
                   />
+                )} />
+                <form.Field name="git.branch" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                  <TextField
+                    label="Branch"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="Git branch to use"
+                    error={field.state.meta.errors?.[0]}
+                  />
+                )} />
+                <form.Field name="git.syncInterval" children={(field: { state: { value: number; meta: { errors: string[] } }; handleChange: (v: number) => void }) => (
+                  <NumberField
+                    label="Sync Interval (seconds)"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="How often to sync with remote (0 to disable auto-sync)"
+                    error={field.state.meta.errors?.[0]}
+                    min={0}
+                  />
+                )} />
+                <form.Field name="git.userName" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                  <TextField
+                    label="User Name"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="Git user name for commits"
+                    error={field.state.meta.errors?.[0]}
+                  />
+                )} />
+                <form.Field name="git.userEmail" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                  <TextField
+                    label="User Email"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    description="Git user email for commits"
+                    error={field.state.meta.errors?.[0]}
+                  />
+                )} />
+                <form.Field name="git.auth.type" children={(field: { state: { value: string; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                  <SelectField
+                    label="Authentication Type"
+                    value={field.state.value}
+                    onChange={(v: string) => field.handleChange(v as 'none' | 'token' | 'ssh-key')}
+                    options={[
+                      { value: 'none', label: 'None (public repo or SSH agent)' },
+                      { value: 'ssh-key', label: 'SSH Key File' },
+                      { value: 'token', label: 'Access Token' },
+                    ]}
+                    description="SSH agent keys are used automatically when 'None' is selected"
+                  />
+                )} />
+                {gitAuthType === 'token' && (
+                  <form.Field name="git.auth.tokenFile" children={(tokenFileField: { state: { value: string | undefined; meta: { errors: string[] } }; handleChange: (v: string | undefined) => void }) => (
+                    <form.Field name="git.auth.tokenEnvVar" children={(tokenEnvVarField: { state: { value: string | undefined; meta: { errors: string[] } }; handleChange: (v: string | undefined) => void }) => (
+                      <SecretField
+                        label="Git Token"
+                        sourceName="git"
+                        secretType="token"
+                        filePath={tokenFileField.state.value}
+                        envVar={tokenEnvVarField.state.value}
+                        onFilePathChange={(v) => {
+                          tokenFileField.handleChange(v)
+                          if (v !== undefined) {
+                            tokenEnvVarField.handleChange(undefined)
+                          }
+                        }}
+                        onEnvVarChange={(v) => {
+                          tokenEnvVarField.handleChange(v)
+                          if (v !== undefined) {
+                            tokenFileField.handleChange(undefined)
+                          }
+                        }}
+                        description="Personal access token for Git authentication"
+                      />
+                    )} />
+                  )} />
                 )}
-                {value.git.auth.type === 'ssh-key' && (
-                  <PathField
-                    label="SSH Key Path"
-                    value={value.git.auth.sshKeyPath || ''}
-                    onChange={(v) => updateGitAuth('sshKeyPath', v)}
-                    description="Path to SSH private key (leave empty to use SSH agent)"
-                    placeholder="~/.ssh/id_rsa"
-                    mode="file"
-                  />
+                {gitAuthType === 'ssh-key' && (
+                  <form.Field name="git.auth.sshKeyPath" children={(field: { state: { value: string | undefined; meta: { errors: string[] } }; handleChange: (v: string) => void }) => (
+                    <PathField
+                      label="SSH Key Path"
+                      value={field.state.value || ''}
+                      onChange={field.handleChange}
+                      description="Path to SSH private key (leave empty to use SSH agent)"
+                      placeholder="~/.ssh/id_rsa"
+                      mode="file"
+                    />
+                  )} />
                 )}
               </>
             )}

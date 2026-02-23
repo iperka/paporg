@@ -1,54 +1,75 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Settings } from 'lucide-react'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useResource } from '@/queries/use-resource'
+import { useUpdateResource } from '@/mutations/use-gitops-mutations'
 import { useToast } from '@/components/ui/use-toast'
 import { ResourcePanel } from '@/components/resource/ResourcePanel'
 import { SettingsForm } from '@/components/forms/SettingsForm'
 import { YamlEditor } from '@/components/ui/yaml-editor'
+import { useAutoSave } from '@/hooks/useAutoSave'
+import { useForm, useStore } from '@tanstack/react-form'
 import {
   type SettingsSpec,
   type SettingsResource,
   createDefaultSettingsSpec,
   settingsSpecSchema,
 } from '@/schemas/resources'
+import { zodFormValidator } from '@/lib/form-utils'
+import type { FileTreeNode } from '@/types/gitops'
 import yaml from 'js-yaml'
 
 export function SettingsPage() {
-  const { fileTree, selectFile, selectedResource, updateResource, isLoading } = useGitOps()
+  const { data: fileTree } = useFileTree()
+  const updateResourceMut = useUpdateResource()
   const { toast } = useToast()
 
-  const [formData, setFormData] = useState<SettingsSpec>(createDefaultSettingsSpec())
   const [yamlContent, setYamlContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [initialData, setInitialData] = useState<SettingsSpec | null>(null)
 
-  // Find and select the settings resource on mount
-  useEffect(() => {
-    const findSettingsPath = (node: typeof fileTree): string | null => {
+  // TanStack Form - use function validator for Zod schemas with .default() fields
+  const form = useForm({
+    defaultValues: createDefaultSettingsSpec(),
+    validators: {
+      onChange: zodFormValidator(settingsSpecSchema),
+    },
+    onSubmit: async () => {
+      // Submit handled via handleSave
+    },
+  })
+
+  // Subscribe to form state via the form's store
+  const formValues = useStore(form.store, (state) => state.values)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const canSubmit = useStore(form.store, (state) => state.canSubmit)
+
+  // Find the Settings resource name from the file tree
+  const settingsName = useMemo(() => {
+    const findSettingsName = (node: FileTreeNode): string | null => {
       if (!node) return null
       if (node.resource?.kind === 'Settings') {
-        return node.path
+        return node.resource.name
       }
       for (const child of node.children) {
-        const found = findSettingsPath(child)
+        const found = findSettingsName(child)
         if (found) return found
       }
       return null
     }
 
-    const path = findSettingsPath(fileTree)
-    if (path) {
-      selectFile(path)
-    }
-  }, [fileTree, selectFile])
+    return fileTree ? findSettingsName(fileTree) : null
+  }, [fileTree])
+
+  // Load the settings resource directly by kind+name
+  const { data: settingsResource, isLoading } = useResource('Settings', settingsName ?? '', !!settingsName)
 
   // Parse the loaded resource
   useEffect(() => {
-    if (!selectedResource?.yaml) return
+    if (!settingsResource?.yaml) return
 
     try {
-      const parsed = yaml.load(selectedResource.yaml) as SettingsResource
+      const parsed = yaml.load(settingsResource.yaml) as SettingsResource
       if (parsed?.spec) {
         // Merge with defaults to ensure all nested objects exist
         const defaults = createDefaultSettingsSpec()
@@ -66,21 +87,21 @@ export function SettingsPage() {
             auth: { ...defaults.git.auth, ...parsed.spec.git?.auth },
           },
         }
-        setFormData(mergedSpec)
-        setYamlContent(selectedResource.yaml)
-        setInitialData(JSON.parse(JSON.stringify(mergedSpec)))
+        form.reset(mergedSpec)
+        setYamlContent(settingsResource.yaml)
         setError(null)
       }
     } catch {
       setError('Failed to parse settings YAML')
     }
-  }, [selectedResource])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsResource])
 
   // Check for unsaved changes
-  const hasChanges = useMemo(() => {
-    if (!initialData) return false
-    return JSON.stringify(formData) !== JSON.stringify(initialData)
-  }, [formData, initialData])
+  const hasChanges = isDirty
+
+  // Check if form is valid for auto-save
+  const isValidForSave = canSubmit
 
   // Sync form changes to YAML
   useEffect(() => {
@@ -89,13 +110,43 @@ export function SettingsPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
         metadata: { name: 'settings', labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       setYamlContent(yaml.dump(resource, { lineWidth: -1 }))
     } catch {
       // Ignore serialization errors while editing
     }
-  }, [formData])
+  }, [formValues])
+
+  // Auto-save handler
+  const handleAutoSave = useCallback(async () => {
+    if (!isValidForSave) return
+
+    const resource: SettingsResource = {
+      apiVersion: 'paporg.io/v1',
+      kind: 'Settings',
+      metadata: { name: 'settings', labels: {}, annotations: {} },
+      spec: formValues,
+    }
+    const newYaml = yaml.dump(resource, { lineWidth: -1 })
+
+    try {
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: settingsName ?? 'settings', yamlContent: newYaml })
+      // Reset form baseline after save (updates default values to current)
+      form.reset(formValues)
+    } catch {
+      throw new Error('Failed to save')
+    }
+  }, [isValidForSave, formValues, updateResourceMut, settingsName, form])
+
+  // Auto-save hook
+  const { status: autoSaveStatus, lastSaved, error: autoSaveError } = useAutoSave({
+    data: { formValues },
+    onSave: handleAutoSave,
+    delay: 1500,
+    enabled: isValidForSave,
+    hasChanges,
+  })
 
   // Handle YAML changes
   const handleYamlChange = (newYaml: string) => {
@@ -105,7 +156,9 @@ export function SettingsPage() {
       if (parsed?.spec) {
         const validated = settingsSpecSchema.safeParse(parsed.spec)
         if (validated.success) {
-          setFormData(validated.data)
+          for (const [key, val] of Object.entries(validated.data)) {
+            form.setFieldValue(key as keyof SettingsSpec, val as never)
+          }
           setError(null)
         }
       }
@@ -116,11 +169,8 @@ export function SettingsPage() {
 
   // Save handler
   const handleSave = async () => {
-    // Validate
-    const validation = settingsSpecSchema.safeParse(formData)
-    if (!validation.success) {
-      const firstError = validation.error.errors[0]
-      setError(`Validation error: ${firstError.path.join('.')}: ${firstError.message}`)
+    if (!canSubmit) {
+      setError('Form has validation errors')
       return
     }
 
@@ -132,21 +182,17 @@ export function SettingsPage() {
         apiVersion: 'paporg.io/v1',
         kind: 'Settings',
         metadata: { name: 'settings', labels: {}, annotations: {} },
-        spec: formData,
+        spec: formValues,
       }
       const newYaml = yaml.dump(resource, { lineWidth: -1 })
 
-      const success = await updateResource('Settings', 'settings', newYaml)
+      await updateResourceMut.mutateAsync({ kind: 'Settings', name: settingsName ?? 'settings', yamlContent: newYaml })
 
-      if (success) {
-        setInitialData(JSON.parse(JSON.stringify(formData)))
-        toast({
-          title: 'Settings saved',
-          description: 'Your settings have been saved successfully.',
-        })
-      } else {
-        setError('Failed to save settings')
-      }
+      form.reset(formValues)
+      toast({
+        title: 'Settings saved',
+        description: 'Your settings have been saved successfully.',
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save settings')
     } finally {
@@ -154,7 +200,7 @@ export function SettingsPage() {
     }
   }
 
-  const settingsNotFound = !isLoading && fileTree && !selectedResource
+  const settingsNotFound = !isLoading && fileTree && !settingsResource
 
   return (
     <div className="space-y-6">
@@ -182,13 +228,14 @@ export function SettingsPage() {
           description="Configure input/output directories, OCR, and Git sync"
           isLoading={isLoading}
           isSaving={isSaving}
-          error={error}
+          error={error || autoSaveError}
           hasChanges={hasChanges}
           onSave={handleSave}
+          autoSaveStatus={autoSaveStatus}
+          lastSaved={lastSaved}
           formContent={
             <SettingsForm
-              value={formData}
-              onChange={setFormData}
+              form={form}
             />
           }
           yamlContent={

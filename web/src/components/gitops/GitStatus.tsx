@@ -1,7 +1,9 @@
 import { GitBranch, GitCommit, Check, AlertCircle, ArrowDown, ArrowUp, RefreshCw } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useGitStatus } from '@/queries/use-git-status'
+import { useGitPull } from '@/mutations/use-gitops-mutations'
 import { cn } from '@/lib/utils'
 
 interface GitStatusProps {
@@ -9,7 +11,11 @@ interface GitStatusProps {
 }
 
 export function GitStatus({ onCommitClick }: GitStatusProps) {
-  const { gitStatus, gitPull, refreshGitStatus, isLoading } = useGitOps()
+  const { data: gitStatus } = useGitStatus()
+  const gitPullMut = useGitPull()
+  const qc = useQueryClient()
+
+  const isLoading = gitPullMut.isPending
 
   if (!gitStatus) {
     return null
@@ -72,7 +78,7 @@ export function GitStatus({ onCommitClick }: GitStatusProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={gitPull}
+            onClick={() => gitPullMut.mutate()}
             disabled={isLoading}
             className="h-7"
           >
@@ -98,7 +104,7 @@ export function GitStatus({ onCommitClick }: GitStatusProps) {
           variant="ghost"
           size="icon"
           className="h-7 w-7"
-          onClick={refreshGitStatus}
+          onClick={() => qc.invalidateQueries({ queryKey: ['git', 'status'] })}
           disabled={isLoading}
           title="Refresh git status"
         >

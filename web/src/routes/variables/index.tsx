@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useFileTree } from '@/queries/use-file-tree'
+import { useCreateDirectory } from '@/mutations/use-gitops-mutations'
 import { Variable, Plus, FolderPlus } from 'lucide-react'
 import { FolderTreeView } from '@/components/organization/FolderTreeView'
 import { CreateFolderDialog } from '@/components/organization/CreateFolderDialog'
 import { useToast } from '@/components/ui/use-toast'
+import type { FileTreeNode } from '@/types/gitops'
 
 export function VariablesPage() {
-  const { fileTree, createDirectory } = useGitOps()
+  const { data: fileTree } = useFileTree()
+  const createDirectoryMut = useCreateDirectory()
   const { toast } = useToast()
   const [showFolderDialog, setShowFolderDialog] = useState(false)
 
@@ -17,7 +20,7 @@ export function VariablesPage() {
   const getVariables = (): { name: string; path: string }[] => {
     const variables: { name: string; path: string }[] = []
 
-    const traverse = (node: typeof fileTree) => {
+    const traverse = (node: FileTreeNode | null) => {
       if (!node) return
       if (node.resource?.kind === 'Variable') {
         variables.push({ name: node.resource.name, path: node.path })
@@ -33,13 +36,13 @@ export function VariablesPage() {
 
   const handleCreateFolder = async (name: string) => {
     const path = `variables/${name}`
-    const success = await createDirectory(path)
-    if (success) {
+    try {
+      await createDirectoryMut.mutateAsync({ path })
       toast({
         title: 'Folder created',
         description: `Created folder "${name}"`,
       })
-    } else {
+    } catch {
       throw new Error('Failed to create folder')
     }
   }

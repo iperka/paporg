@@ -16,10 +16,10 @@ vi.mock('@/contexts/JobsContext', () => ({
   })),
 }))
 
-vi.mock('@/contexts/GitOpsContext', () => ({
-  useGitOps: vi.fn(() => ({
-    fileTree: null,
-    isConnected: true,
+vi.mock('@/queries/use-file-tree', () => ({
+  useFileTree: vi.fn(() => ({
+    data: null,
+    isLoading: false,
   })),
 }))
 
@@ -83,7 +83,7 @@ describe('useStats', () => {
 
   it('should return dashboard stats from mocked contexts', async () => {
     const { useJobsContext } = await import('@/contexts/JobsContext')
-    const { useGitOps } = await import('@/contexts/GitOpsContext')
+    const { useFileTree } = await import('@/queries/use-file-tree')
 
     const mockJobs = new Map<string, StoredJob>([
       ['job-1', {
@@ -156,34 +156,9 @@ describe('useStats', () => {
       ],
     }
 
-    vi.mocked(useGitOps).mockReturnValue({
-      fileTree: mockFileTree,
-      isConnected: true,
-      gitStatus: null,
-      branches: [],
-      selectedPath: null,
-      selectedResource: null,
+    vi.mocked(useFileTree).mockReturnValue({
+      data: mockFileTree,
       isLoading: false,
-      error: null,
-      settings: null,
-      needsInitialization: false,
-      initialLoadComplete: true,
-      refreshTree: vi.fn(),
-      refreshGitStatus: vi.fn(),
-      refreshBranches: vi.fn(),
-      selectFile: vi.fn(),
-      createResource: vi.fn(),
-      updateResource: vi.fn(),
-      deleteResource: vi.fn(),
-      gitPull: vi.fn(),
-      gitCommit: vi.fn(),
-      checkoutBranch: vi.fn(),
-      createBranch: vi.fn(),
-      moveFile: vi.fn(),
-      createDirectory: vi.fn(),
-      deleteFile: vi.fn(),
-      initializeGit: vi.fn(),
-      getFileStatus: vi.fn(),
     })
 
     // Import useStats after mocks are set up

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useJobsContext } from '@/contexts/JobsContext'
-import { useGitOps } from '@/contexts/GitOpsContext'
+import { useFileTree } from '@/queries/use-file-tree'
 import { isUnsortedJob } from '@/utils/jobs'
 import type { FileTreeNode } from '@/types/gitops'
 import type { StoredJob } from '@/types/jobs'
@@ -134,7 +134,8 @@ export function useStats(): DashboardStats {
     failedJobs,
   } = useJobsContext()
 
-  const { fileTree, isConnected: isGitOpsConnected } = useGitOps()
+  const { data: fileTree } = useFileTree()
+  const isGitOpsConnected = true // Always connected in Tauri
 
   const rulesCount = useMemo(() => countRulesInTree(fileTree), [fileTree])
 
