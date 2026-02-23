@@ -72,14 +72,20 @@ export function HelpPage() {
     const lastYear = (now.getFullYear() - 1).toString()
     const currentMonth = String(now.getMonth() + 1).padStart(2, '0')
     const currentDay = String(now.getDate()).padStart(2, '0')
+    const currentHour = String(now.getHours()).padStart(2, '0')
+    const currentMinute = String(now.getMinutes()).padStart(2, '0')
+    const currentSecond = String(now.getSeconds()).padStart(2, '0')
 
     return [
       { name: '$y', description: 'Current year (4 digits)', example: currentYear },
       { name: '$l', description: 'Last year (4 digits)', example: lastYear },
       { name: '$m', description: 'Current month (2 digits)', example: currentMonth },
       { name: '$d', description: 'Current day (2 digits)', example: currentDay },
+      { name: '$h', description: 'Current hour (2 digits, 00–23)', example: currentHour },
+      { name: '$i', description: 'Current minute (2 digits, 00–59)', example: currentMinute },
+      { name: '$s', description: 'Current second (2 digits, 00–59)', example: currentSecond },
       ...staticBuiltInVariables,
-      { name: '$timestamp', description: 'ISO 8601 timestamp', example: `${currentYear}-${currentMonth}-${currentDay}T14:30:00` },
+      { name: '$timestamp', description: 'ISO 8601 timestamp', example: `${currentYear}-${currentMonth}-${currentDay}T${currentHour}:${currentMinute}:${currentSecond}` },
     ]
   }, [])
 

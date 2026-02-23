@@ -114,7 +114,7 @@ export function RuleForm({
                 label="Output Directory"
                 value={field.state.value}
                 onChange={field.handleChange}
-                description="Output directory template. Variables: $y (year), $l (last year), $m (month), $category, custom variables"
+                description="Output directory template. Variables: $y (year), $l (last year), $m (month), $d (day), $h (hour), $i (minute), $s (second), $category, custom variables"
                 error={field.state.meta.errors?.[0]}
                 required
                 mono
@@ -127,7 +127,7 @@ export function RuleForm({
                 label="Filename"
                 value={field.state.value}
                 onChange={field.handleChange}
-                description="Filename template. Variables: $original, $timestamp, custom variables"
+                description="Filename template. Variables: $original, $timestamp, $h (hour), $i (minute), $s (second), custom variables"
                 error={field.state.meta.errors?.[0]}
                 required
                 mono
