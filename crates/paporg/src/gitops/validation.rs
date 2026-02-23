@@ -12,6 +12,7 @@ static RE_VARIABLE: LazyLock<Regex> =
 /// These must exactly match the keys registered in `VariableEngine::get_builtin_variables()`.
 const BUILTIN_VARIABLE_NAMES: &[&str] = &[
     "y",
+    "l",
     "m",
     "d",
     "h",
