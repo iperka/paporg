@@ -9,24 +9,16 @@ static RE_VARIABLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\$([a-zA-Z_][a-zA-Z0-9_]*)").unwrap());
 
 /// Names reserved for built-in variables. Extracted variables must not use these names.
+/// These must exactly match the keys registered in `VariableEngine::get_builtin_variables()`.
 const BUILTIN_VARIABLE_NAMES: &[&str] = &[
     "y",
-    "year",
     "m",
-    "month",
     "d",
-    "day",
     "h",
-    "hour",
     "i",
-    "minute",
     "s",
-    "second",
     "original",
     "timestamp",
-    "ext",
-    "extension",
-    "category",
     "uuid",
 ];
 
@@ -142,8 +134,8 @@ impl ConfigValidator {
         // Check for collision with built-in variable names
         if BUILTIN_VARIABLE_NAMES.contains(&name.as_str()) {
             self.errors.push(format!(
-                "Variable '{}': extracted variable name '{}' conflicts with built-in variable",
-                name, name
+                "Variable '{}': metadata.name '{}' conflicts with built-in variable '${}'; choose a different name",
+                name, name, name
             ));
         }
 
@@ -985,7 +977,7 @@ mod tests {
     #[test]
     fn test_builtin_variable_references() {
         let mut rule = create_minimal_rule("test");
-        rule.spec.output.directory = "Archive/$year/$month".to_string();
+        rule.spec.output.directory = "Archive/$y/$m".to_string();
         rule.spec.output.filename = "$original_$timestamp".to_string();
 
         let config = LoadedConfig {
@@ -2094,12 +2086,12 @@ mod tests {
 
     #[test]
     fn test_variable_name_conflicts_with_builtin() {
-        // "year" is a built-in — should be rejected
+        // "y" is a built-in — should be rejected
         let config = LoadedConfig {
             settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
             variables: vec![ResourceWithPath::new(
-                create_minimal_variable("year", r"(?P<year>\d{4})"),
-                "variables/year.yaml",
+                create_minimal_variable("y", r"(?P<y>\d{4})"),
+                "variables/y.yaml",
             )],
             rules: vec![],
             import_sources: vec![],
@@ -2111,7 +2103,7 @@ mod tests {
         assert!(validator
             .errors()
             .iter()
-            .any(|e| e.contains("conflicts with built-in variable") && e.contains("year")));
+            .any(|e| e.contains("conflicts with built-in variable") && e.contains("'y'")));
     }
 
     #[test]
@@ -2236,16 +2228,15 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_time_alias_vars_accepted_in_templates() {
-        // Rules that reference hour, minute, second aliases in templates should be valid
-        let mut rule = create_minimal_rule("test");
-        rule.spec.output.directory = "$year/$month/$day".to_string();
-        rule.spec.output.filename = "$original_$hour$minute$second".to_string();
-
+    fn test_non_builtin_alias_name_accepted() {
+        // "year" is NOT an implemented built-in (only "y" is) — should be accepted as a user variable
         let config = LoadedConfig {
             settings: ResourceWithPath::new(create_minimal_settings(), "settings.yaml"),
-            variables: vec![],
-            rules: vec![ResourceWithPath::new(rule, "rules/test.yaml")],
+            variables: vec![ResourceWithPath::new(
+                create_minimal_variable("year", r"(?P<year>\d{4})"),
+                "variables/year.yaml",
+            )],
+            rules: vec![],
             import_sources: vec![],
         };
 
