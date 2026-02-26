@@ -243,7 +243,7 @@ export interface UploadResult {
 /**
  * Helper to unwrap API responses and throw on errors.
  */
-async function unwrap<T>(response: ApiResponse<T>): Promise<T> {
+export async function unwrap<T>(response: ApiResponse<T>): Promise<T> {
   if (!response.success) {
     throw new Error(response.error || 'Unknown error');
   }

@@ -1,0 +1,14 @@
+pre-commit:
+  parallel: true
+  commands:
+    rust-fmt:
+      glob: "*.rs"
+      run: cargo fmt -- --check
+    eslint:
+      glob: "web/src/**/*.{ts,tsx}"
+      run: cd web && npx eslint --max-warnings 0 {staged_files}
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx --no -- commitlint --edit {1}

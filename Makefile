@@ -2,7 +2,7 @@
         build-macos build-macos-intel build-macos-arm \
         build-linux build-windows \
         dev dev-otel clean test lint fmt check \
-        install install-tauri install-targets setup-hooks icons \
+        install install-deps install-tauri install-targets icons \
         release release-patch release-minor release-major \
         observability-up observability-down \
         help
@@ -138,13 +138,13 @@ release-major:
 
 # Run tests
 test:
-	cargo test
+	cargo test --workspace
 	cd web && npm test -- --run
 
 # Lint all code
 lint:
 	cd web && npm run lint
-	cargo clippy -- -D warnings
+	cargo clippy --workspace -- -D warnings
 
 # Format code
 fmt:
@@ -162,6 +162,7 @@ check:
 
 # Install all dependencies
 install: install-deps install-tauri install-targets
+	@command -v lefthook >/dev/null 2>&1 && lefthook install || echo "Install lefthook for git hooks: https://github.com/evilmartians/lefthook"
 
 # Install frontend dependencies
 install-deps:
@@ -177,12 +178,6 @@ install-targets:
 	rustup target add aarch64-apple-darwin
 	rustup target add x86_64-unknown-linux-gnu
 	rustup target add x86_64-pc-windows-msvc
-
-# Setup git hooks
-setup-hooks:
-	cp scripts/pre-commit .git/hooks/pre-commit
-	chmod +x .git/hooks/pre-commit
-	@echo "Git hooks installed successfully!"
 
 # ============================================
 # Utilities
@@ -243,11 +238,10 @@ help:
 	@echo "  check              - Check formatting and lint (CI-style)"
 	@echo ""
 	@echo "Setup:"
-	@echo "  install            - Install all dependencies"
+	@echo "  install            - Install all dependencies + lefthook hooks"
 	@echo "  install-deps       - Install frontend dependencies"
 	@echo "  install-tauri      - Install Tauri CLI"
 	@echo "  install-targets    - Install Rust cross-compilation targets"
-	@echo "  setup-hooks        - Install git pre-commit hooks"
 	@echo ""
 	@echo "Observability:"
 	@echo "  observability-up   - Start Grafana + Tempo + Loki + Pyroscope stack"
