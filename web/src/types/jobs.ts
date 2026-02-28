@@ -24,7 +24,6 @@ export interface JobProgressEvent {
   symlinks: string[]
   category?: string
   error?: string
-  ocrText?: string
   sourcePath?: string
   sourceName?: string
   mimeType?: string
@@ -43,7 +42,6 @@ export interface StoredJob {
   category?: string
   error?: string
   message: string
-  ocrText?: string
   sourcePath?: string
   sourceName?: string
   ignored?: boolean

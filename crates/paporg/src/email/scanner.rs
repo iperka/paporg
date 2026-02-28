@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::db::Database;
 use chrono::{DateTime, NaiveDate, Utc};
-use sea_orm::DatabaseConnection;
 use tracing::{debug, error, info, info_span, warn};
 
 use crate::gitops::resource::EmailSourceConfig;
@@ -20,7 +20,7 @@ pub struct EmailSourceScanner {
     config: EmailSourceConfig,
     source_name: String,
     temp_dir: PathBuf,
-    db: Option<DatabaseConnection>,
+    db: Option<Database>,
 }
 
 impl EmailSourceScanner {
@@ -35,7 +35,7 @@ impl EmailSourceScanner {
     }
 
     /// Sets the database connection for tracking processed emails.
-    pub fn with_database(mut self, db: DatabaseConnection) -> Self {
+    pub fn with_database(mut self, db: Database) -> Self {
         self.db = Some(db);
         self
     }
@@ -57,7 +57,7 @@ impl EmailSourceScanner {
         // Set up tracker if database is available
         let tracker = if let Some(db) = &self.db {
             let mut tracker = EmailTracker::new(db.clone(), self.source_name.clone());
-            tracker.set_uidvalidity(uidvalidity).await?;
+            tracker.set_uidvalidity(uidvalidity)?;
             Some(tracker)
         } else {
             warn!(
@@ -125,7 +125,7 @@ impl EmailSourceScanner {
 
                     // Mark as processed
                     if let Some(tracker) = tracker.as_ref() {
-                        if let Err(e) = tracker.mark_processed(uid, None).await {
+                        if let Err(e) = tracker.mark_processed(uid, None) {
                             error!("Failed to mark UID {} as processed: {}", uid, e);
                         }
                     }
@@ -160,7 +160,7 @@ impl EmailSourceScanner {
             client.search_since_date(&imap_date).await?
         } else if let Some(tracker) = tracker {
             // Search since last processed UID
-            if let Some(last_uid) = tracker.last_processed_uid().await? {
+            if let Some(last_uid) = tracker.last_processed_uid()? {
                 client.search_since_uid(last_uid).await?
             } else {
                 // First run - get all UIDs (limited by batch size later)
@@ -174,7 +174,7 @@ impl EmailSourceScanner {
 
         // Filter out already processed UIDs
         if let Some(tracker) = tracker {
-            tracker.filter_unprocessed(uids).await
+            tracker.filter_unprocessed(uids)
         } else {
             Ok(uids)
         }

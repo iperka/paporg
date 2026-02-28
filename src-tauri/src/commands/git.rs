@@ -6,8 +6,8 @@ use paporg::gitops::git::{
     BranchInfo, CommitInfo, CommitResult, GitRepository, GitStatus, InitializeResult, MergeStatus,
     PullResult,
 };
-use std::path::PathBuf;
 use paporg::gitops::progress::GitOperationType;
+use std::path::PathBuf;
 use tauri::State;
 use tokio::sync::RwLock;
 

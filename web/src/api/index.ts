@@ -54,7 +54,6 @@ export interface StoredJob {
   archivePath: string | null;
   symlinks: string[];
   errorMessage: string | null;
-  ocrText: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,7 +77,6 @@ export interface JobQueryParams {
 
 export interface OcrResponse {
   text: string;
-  cached: boolean;
 }
 
 export interface RerunResponse {

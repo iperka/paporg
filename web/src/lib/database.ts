@@ -1,8 +1,17 @@
 import Database from '@tauri-apps/plugin-sql';
-import type { StoredJob, JobQueryParams, JobListResponse } from '@/api/index';
+import { invoke } from '@tauri-apps/api/core';
+import type { ApiResponse, StoredJob, JobQueryParams, JobListResponse } from '@/api/index';
 
 let db: Database | null = null;
 let dbPromise: Promise<Database> | null = null;
+
+async function resolveDatabasePath(): Promise<string> {
+  const response = await invoke<ApiResponse<{ path: string }>>('get_database_path');
+  if (!response.success || !response.data) {
+    throw new Error(response.error || 'Could not determine database path');
+  }
+  return response.data.path;
+}
 
 export async function getDatabase(): Promise<Database> {
   // Return existing instance if available
@@ -11,8 +20,10 @@ export async function getDatabase(): Promise<Database> {
   // Return in-flight promise if loading is in progress (prevents race conditions)
   if (dbPromise) return dbPromise;
 
-  // Start loading and store the promise
-  dbPromise = Database.load('sqlite:paporg.db');
+  // Resolve the database path from the backend, then load
+  dbPromise = resolveDatabasePath().then((dbPath) =>
+    Database.load(`sqlite:${dbPath}`)
+  );
 
   try {
     db = await dbPromise;
@@ -102,7 +113,6 @@ function rowToStoredJob(row: JobRow): StoredJob {
     archivePath: row.archive_path,
     symlinks: parseJsonSafe<string[]>(row.symlinks, []),
     errorMessage: row.error,
-    ocrText: null, // OCR text is fetched separately
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -187,7 +197,7 @@ export async function queryJobs(params: JobQueryParams): Promise<JobListResponse
   };
 }
 
-export async function insertJob(job: Omit<StoredJob, 'ocrText'>): Promise<void> {
+export async function insertJob(job: StoredJob): Promise<void> {
   const database = await getDatabase();
   await database.execute(
     `INSERT INTO jobs (id, filename, source_path, source_name, mime_type, status, category, output_path, archive_path, symlinks, error, created_at, updated_at)

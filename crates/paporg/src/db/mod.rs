@@ -1,51 +1,80 @@
-//! Database module for persistent job storage.
+//! Database module for persistent storage.
 //!
-//! Uses SeaORM for database access with support for SQLite and PostgreSQL.
+//! Uses rusqlite (SQLite) with a thread-safe `Database` handle.
+//! All access is serialized through a `Mutex<Connection>`.
 
-use sea_orm::{ConnectOptions, Database, DatabaseConnection, DbErr};
-use sea_orm_migration::MigratorTrait;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-pub mod entities;
+use rusqlite::Connection;
+
+pub mod email_repo;
+pub mod error;
+pub mod job_repo;
 pub mod migrations;
+pub mod oauth_repo;
+pub mod stats_repo;
 
-pub use entities::Job;
+pub use error::DatabaseError;
 
-/// Initialize database connection and run migrations.
-pub async fn init_database(database_url: &str) -> Result<DatabaseConnection, DbErr> {
-    let _span = tracing::info_span!("db.init").entered();
-    tracing::info!("Connecting to database: {}", redact_url(database_url));
-
-    let mut opt = ConnectOptions::new(database_url);
-    opt.sqlx_logging(false); // Reduce noise in logs
-
-    let db = Database::connect(opt).await?;
-
-    tracing::info!("Running database migrations...");
-    migrations::Migrator::up(&db, None).await?;
-
-    tracing::info!("Database initialized successfully");
-    Ok(db)
+/// Thread-safe database handle wrapping a single rusqlite connection.
+///
+/// Cloning is cheap (inner `Arc`). All access is serialized through
+/// a `Mutex`, which is fine for SQLite (which serializes writes anyway).
+/// WAL mode is enabled for concurrent read performance.
+#[derive(Clone)]
+pub struct Database {
+    conn: Arc<Mutex<Connection>>,
 }
 
-/// Redact password from database URL for logging.
-fn redact_url(url: &str) -> String {
-    // Simple redaction - hide password if present
-    if let Some(at_pos) = url.find('@') {
-        if let Some(colon_pos) = url[..at_pos].rfind(':') {
-            if let Some(slash_pos) = url[..colon_pos].rfind('/') {
-                let prefix = &url[..slash_pos + 1];
-                let suffix = &url[at_pos..];
-                return format!("{}***{}", prefix, suffix);
-            }
+impl Database {
+    /// Opens (or creates) the database at the given path and runs all
+    /// pending migrations.
+    pub fn open(path: &Path) -> Result<Self, DatabaseError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DatabaseError::Io {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
         }
+
+        let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+
+        migrations::run_all(&conn)?;
+
+        log::info!("Database opened at {}", path.display());
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
-    url.to_string()
+
+    /// Opens an in-memory database for testing. Runs all migrations.
+    pub fn open_in_memory() -> Result<Self, DatabaseError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+
+        migrations::run_all(&conn)?;
+
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    /// Provides locked access to the underlying connection.
+    pub fn with_conn<F, T>(&self, f: F) -> Result<T, DatabaseError>
+    where
+        F: FnOnce(&Connection) -> Result<T, DatabaseError>,
+    {
+        let conn = self.conn.lock().map_err(|_| DatabaseError::LockPoisoned)?;
+        f(&conn)
+    }
 }
 
-/// Get the default database path based on config directory.
-pub fn default_database_path(config_dir: &std::path::Path) -> String {
-    let db_path = config_dir.join("paporg.db");
-    format!("sqlite:{}?mode=rwc", db_path.display())
+/// Returns the canonical database path: `~/.paporg/data/paporg.db`.
+pub fn default_database_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".paporg").join("data").join("paporg.db"))
 }
 
 #[cfg(test)]
@@ -53,25 +82,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_redact_url_postgres() {
-        let url = "postgres://user:password@localhost/paporg";
-        let redacted = redact_url(url);
-        assert!(redacted.contains("***"));
-        assert!(!redacted.contains("password"));
+    fn test_open_in_memory() {
+        let db = Database::open_in_memory().unwrap();
+        db.with_conn(|conn| {
+            let count: u32 =
+                conn.query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))?;
+            assert!(count > 0);
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
-    fn test_redact_url_sqlite() {
-        let url = "sqlite:./paporg.db?mode=rwc";
-        let redacted = redact_url(url);
-        assert_eq!(redacted, url);
+    fn test_open_file_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let db = Database::open(&path).unwrap();
+        db.with_conn(|conn| {
+            let count: u32 =
+                conn.query_row("SELECT COUNT(*) FROM _migrations", [], |r| r.get(0))?;
+            assert!(count > 0);
+            Ok(())
+        })
+        .unwrap();
+        assert!(path.exists());
     }
 
     #[test]
     fn test_default_database_path() {
-        let config_dir = std::path::Path::new("/home/user/.config/paporg");
-        let path = default_database_path(config_dir);
-        assert!(path.starts_with("sqlite:"));
-        assert!(path.contains("paporg.db"));
+        let path = default_database_path();
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert!(path.ends_with("paporg.db"));
+        assert!(path.to_string_lossy().contains(".paporg"));
+    }
+
+    #[test]
+    fn test_database_is_clone() {
+        let db = Database::open_in_memory().unwrap();
+        let db2 = db.clone();
+        // Both should access the same underlying connection.
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO jobs (id, filename, source_path, created_at, updated_at) VALUES ('t1', 'f.pdf', '/tmp/f.pdf', '2026-01-01', '2026-01-01')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        db2.with_conn(|conn| {
+            let count: u32 = conn.query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))?;
+            assert_eq!(count, 1);
+            Ok(())
+        })
+        .unwrap();
     }
 }

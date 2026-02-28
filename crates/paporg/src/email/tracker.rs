@@ -2,24 +2,21 @@
 
 use chrono::Utc;
 use log::{debug, info, warn};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-};
 
-use crate::db::entities::processed_email;
+use crate::db::{email_repo, Database};
 
-use super::error::{EmailError, Result};
+use super::error::Result;
 
 /// Tracks which email UIDs have been processed for each import source.
 pub struct EmailTracker {
-    db: DatabaseConnection,
+    db: Database,
     source_name: String,
     current_uidvalidity: Option<u32>,
 }
 
 impl EmailTracker {
     /// Creates a new email tracker for the given source.
-    pub fn new(db: DatabaseConnection, source_name: String) -> Self {
+    pub fn new(db: Database, source_name: String) -> Self {
         Self {
             db,
             source_name,
@@ -31,9 +28,8 @@ impl EmailTracker {
     ///
     /// If UIDVALIDITY has changed (folder was recreated), this clears the
     /// tracking data for this source since UIDs are no longer valid.
-    pub async fn set_uidvalidity(&mut self, uidvalidity: u32) -> Result<()> {
-        // Get the last known UIDVALIDITY for this source
-        let last_uidvalidity = self.get_last_uidvalidity().await?;
+    pub fn set_uidvalidity(&mut self, uidvalidity: u32) -> Result<()> {
+        let last_uidvalidity = email_repo::find_last_uidvalidity(&self.db, &self.source_name)?;
 
         if let Some(last) = last_uidvalidity {
             if last != uidvalidity {
@@ -41,7 +37,15 @@ impl EmailTracker {
                     "UIDVALIDITY changed for source '{}': {} -> {}. Clearing tracking data.",
                     self.source_name, last, uidvalidity
                 );
-                self.clear_tracking_data_for_uidvalidity(last).await?;
+                let deleted = email_repo::delete_by_source_and_uidvalidity(
+                    &self.db,
+                    &self.source_name,
+                    last,
+                )?;
+                info!(
+                    "Cleared {} tracking records for source '{}' with UIDVALIDITY {}",
+                    deleted, self.source_name, last
+                );
             }
         }
 
@@ -49,80 +53,39 @@ impl EmailTracker {
         Ok(())
     }
 
-    /// Gets the last known UIDVALIDITY for this source.
-    async fn get_last_uidvalidity(&self) -> Result<Option<u32>> {
-        let record = processed_email::Entity::find()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .order_by_desc(processed_email::Column::ProcessedAt)
-            .one(&self.db)
-            .await?;
-
-        Ok(record.map(|r| r.uidvalidity))
-    }
-
-    /// Clears tracking data for a specific UIDVALIDITY.
-    async fn clear_tracking_data_for_uidvalidity(&self, uidvalidity: u32) -> Result<()> {
-        let result = processed_email::Entity::delete_many()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .filter(processed_email::Column::Uidvalidity.eq(uidvalidity))
-            .exec(&self.db)
-            .await?;
-
-        info!(
-            "Cleared {} tracking records for source '{}' with UIDVALIDITY {}",
-            result.rows_affected, self.source_name, uidvalidity
-        );
-        Ok(())
-    }
-
     /// Returns the last processed UID for the current UIDVALIDITY.
-    pub async fn last_processed_uid(&self) -> Result<Option<u32>> {
-        let uidvalidity = self.current_uidvalidity.ok_or_else(|| {
-            EmailError::ConfigError("UIDVALIDITY not set. Call set_uidvalidity first.".to_string())
-        })?;
-
-        let record = processed_email::Entity::find()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .filter(processed_email::Column::Uidvalidity.eq(uidvalidity))
-            .order_by_desc(processed_email::Column::Uid)
-            .one(&self.db)
-            .await?;
-
-        Ok(record.map(|r| r.uid))
+    pub fn last_processed_uid(&self) -> Result<Option<u32>> {
+        let uidvalidity = self.require_uidvalidity()?;
+        Ok(email_repo::find_last_uid(
+            &self.db,
+            &self.source_name,
+            uidvalidity,
+        )?)
     }
 
     /// Checks if a specific UID has been processed.
-    pub async fn is_processed(&self, uid: u32) -> Result<bool> {
-        let uidvalidity = self.current_uidvalidity.ok_or_else(|| {
-            EmailError::ConfigError("UIDVALIDITY not set. Call set_uidvalidity first.".to_string())
-        })?;
-
-        let id = processed_email::Model::make_id(&self.source_name, uidvalidity, uid);
-        let record = processed_email::Entity::find_by_id(&id)
-            .one(&self.db)
-            .await?;
-
-        Ok(record.is_some())
+    pub fn is_processed(&self, uid: u32) -> Result<bool> {
+        let uidvalidity = self.require_uidvalidity()?;
+        let processed =
+            email_repo::find_processed_uids(&self.db, &self.source_name, uidvalidity, &[uid])?;
+        Ok(!processed.is_empty())
     }
 
     /// Marks a UID as processed.
-    pub async fn mark_processed(&self, uid: u32, message_id: Option<String>) -> Result<()> {
-        let uidvalidity = self.current_uidvalidity.ok_or_else(|| {
-            EmailError::ConfigError("UIDVALIDITY not set. Call set_uidvalidity first.".to_string())
-        })?;
+    pub fn mark_processed(&self, uid: u32, message_id: Option<String>) -> Result<()> {
+        let uidvalidity = self.require_uidvalidity()?;
+        let id = email_repo::make_id(&self.source_name, uidvalidity, uid);
 
-        let id = processed_email::Model::make_id(&self.source_name, uidvalidity, uid);
-
-        let model = processed_email::ActiveModel {
-            id: Set(id),
-            source_name: Set(self.source_name.clone()),
-            uidvalidity: Set(uidvalidity),
-            uid: Set(uid),
-            message_id: Set(message_id),
-            processed_at: Set(Utc::now()),
+        let row = email_repo::ProcessedEmailRow {
+            id,
+            source_name: self.source_name.clone(),
+            uidvalidity,
+            uid,
+            message_id,
+            processed_at: Utc::now().to_rfc3339(),
         };
 
-        model.insert(&self.db).await?;
+        email_repo::insert(&self.db, &row)?;
         debug!(
             "Marked UID {} as processed for source '{}' (UIDVALIDITY={})",
             uid, self.source_name, uidvalidity
@@ -132,34 +95,25 @@ impl EmailTracker {
     }
 
     /// Filters a list of UIDs to only include those that haven't been processed.
-    pub async fn filter_unprocessed(&self, uids: Vec<u32>) -> Result<Vec<u32>> {
-        let uidvalidity = self.current_uidvalidity.ok_or_else(|| {
-            EmailError::ConfigError("UIDVALIDITY not set. Call set_uidvalidity first.".to_string())
-        })?;
+    pub fn filter_unprocessed(&self, uids: Vec<u32>) -> Result<Vec<u32>> {
+        let uidvalidity = self.require_uidvalidity()?;
 
         if uids.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Get all processed UIDs for this source and uidvalidity
-        let processed_records = processed_email::Entity::find()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .filter(processed_email::Column::Uidvalidity.eq(uidvalidity))
-            .filter(processed_email::Column::Uid.is_in(uids.clone()))
-            .all(&self.db)
-            .await?;
+        let processed =
+            email_repo::find_processed_uids(&self.db, &self.source_name, uidvalidity, &uids)?;
 
-        let processed_uids: std::collections::HashSet<u32> =
-            processed_records.into_iter().map(|r| r.uid).collect();
-
+        let processed_set: std::collections::HashSet<u32> = processed.into_iter().collect();
         let unprocessed: Vec<u32> = uids
             .into_iter()
-            .filter(|uid| !processed_uids.contains(uid))
+            .filter(|uid| !processed_set.contains(uid))
             .collect();
 
         debug!(
             "Filtered {} UIDs, {} unprocessed",
-            processed_uids.len() + unprocessed.len(),
+            processed_set.len() + unprocessed.len(),
             unprocessed.len()
         );
 
@@ -167,25 +121,24 @@ impl EmailTracker {
     }
 
     /// Gets statistics for this source.
-    pub async fn stats(&self) -> Result<TrackerStats> {
-        use sea_orm::PaginatorTrait;
-
-        let total_processed = processed_email::Entity::find()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .count(&self.db)
-            .await?;
-
-        let last_processed = processed_email::Entity::find()
-            .filter(processed_email::Column::SourceName.eq(&self.source_name))
-            .order_by_desc(processed_email::Column::ProcessedAt)
-            .one(&self.db)
-            .await?;
+    pub fn stats(&self) -> Result<TrackerStats> {
+        let total_processed = email_repo::count_by_source(&self.db, &self.source_name)?;
+        let last_processed_at = email_repo::find_last_processed_at(&self.db, &self.source_name)?;
 
         Ok(TrackerStats {
             source_name: self.source_name.clone(),
             total_processed,
-            last_processed_at: last_processed.map(|r| r.processed_at),
+            last_processed_at,
             current_uidvalidity: self.current_uidvalidity,
+        })
+    }
+
+    /// Requires that `set_uidvalidity` has been called.
+    fn require_uidvalidity(&self) -> Result<u32> {
+        self.current_uidvalidity.ok_or_else(|| {
+            super::error::EmailError::ConfigError(
+                "UIDVALIDITY not set. Call set_uidvalidity first.".to_string(),
+            )
         })
     }
 }
@@ -197,8 +150,8 @@ pub struct TrackerStats {
     pub source_name: String,
     /// Total number of processed emails.
     pub total_processed: u64,
-    /// When the last email was processed.
-    pub last_processed_at: Option<chrono::DateTime<Utc>>,
+    /// When the last email was processed (ISO 8601).
+    pub last_processed_at: Option<String>,
     /// Current UIDVALIDITY.
     pub current_uidvalidity: Option<u32>,
 }
@@ -207,18 +160,71 @@ pub struct TrackerStats {
 mod tests {
     use super::*;
 
-    // Note: Integration tests would require a database connection.
-    // These are basic unit tests for ID generation.
+    fn test_db() -> Database {
+        Database::open_in_memory().expect("Failed to create test database")
+    }
 
     #[test]
     fn test_make_id() {
-        let id = processed_email::Model::make_id("my-source", 12345, 100);
+        let id = email_repo::make_id("my-source", 12345, 100);
         assert_eq!(id, "my-source:12345:100");
     }
 
     #[test]
     fn test_make_id_special_chars() {
-        let id = processed_email::Model::make_id("source-with-dashes", 1, 2);
+        let id = email_repo::make_id("source-with-dashes", 1, 2);
         assert_eq!(id, "source-with-dashes:1:2");
+    }
+
+    #[test]
+    fn test_mark_and_check_processed() {
+        let db = test_db();
+        let mut tracker = EmailTracker::new(db, "test-source".to_string());
+        tracker.set_uidvalidity(100).unwrap();
+
+        assert!(!tracker.is_processed(42).unwrap());
+        tracker.mark_processed(42, None).unwrap();
+        assert!(tracker.is_processed(42).unwrap());
+    }
+
+    #[test]
+    fn test_last_processed_uid() {
+        let db = test_db();
+        let mut tracker = EmailTracker::new(db, "test-source".to_string());
+        tracker.set_uidvalidity(100).unwrap();
+
+        assert_eq!(tracker.last_processed_uid().unwrap(), None);
+        tracker.mark_processed(10, None).unwrap();
+        tracker.mark_processed(20, None).unwrap();
+        tracker.mark_processed(5, None).unwrap();
+        assert_eq!(tracker.last_processed_uid().unwrap(), Some(20));
+    }
+
+    #[test]
+    fn test_filter_unprocessed() {
+        let db = test_db();
+        let mut tracker = EmailTracker::new(db, "test-source".to_string());
+        tracker.set_uidvalidity(100).unwrap();
+
+        tracker.mark_processed(1, None).unwrap();
+        tracker.mark_processed(3, None).unwrap();
+
+        let unprocessed = tracker.filter_unprocessed(vec![1, 2, 3, 4]).unwrap();
+        assert_eq!(unprocessed, vec![2, 4]);
+    }
+
+    #[test]
+    fn test_stats() {
+        let db = test_db();
+        let mut tracker = EmailTracker::new(db, "test-source".to_string());
+        tracker.set_uidvalidity(100).unwrap();
+
+        tracker.mark_processed(1, None).unwrap();
+        tracker.mark_processed(2, None).unwrap();
+
+        let stats = tracker.stats().unwrap();
+        assert_eq!(stats.total_processed, 2);
+        assert!(stats.last_processed_at.is_some());
+        assert_eq!(stats.current_uidvalidity, Some(100));
     }
 }

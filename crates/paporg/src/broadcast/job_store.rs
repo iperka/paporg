@@ -1,18 +1,94 @@
 //! Job store with persistent database storage.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::RwLock;
 
 use chrono::{DateTime, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
-};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock as TokioRwLock;
 
 use crate::broadcast::job_progress::{JobPhase, JobProgressEvent, JobStatus};
-use crate::db::entities::job;
+use crate::db::job_repo::{self, JobFilter, JobRow};
+use crate::db::{stats_repo, Database, DatabaseError};
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+fn status_to_str(status: &JobStatus) -> &'static str {
+    match status {
+        JobStatus::Processing => "processing",
+        JobStatus::Completed => "completed",
+        JobStatus::Failed => "failed",
+    }
+}
+
+fn phase_to_str(phase: &JobPhase) -> &'static str {
+    match phase {
+        JobPhase::Queued => "queued",
+        JobPhase::Processing => "processing",
+        JobPhase::ExtractVariables => "extract_variables",
+        JobPhase::Categorizing => "categorizing",
+        JobPhase::Substituting => "substituting",
+        JobPhase::Storing => "storing",
+        JobPhase::CreatingSymlinks => "creating_symlinks",
+        JobPhase::Archiving => "archiving",
+        JobPhase::Completed => "completed",
+        JobPhase::Failed => "failed",
+    }
+}
+
+fn parse_status(s: &str, job_id: &str) -> JobStatus {
+    match s {
+        "completed" | "ignored" | "superseded" => JobStatus::Completed,
+        "failed" => JobStatus::Failed,
+        "processing" => JobStatus::Processing,
+        other => {
+            log::warn!(
+                "Unknown job status '{}' for job {}, defaulting to Processing",
+                other,
+                job_id
+            );
+            JobStatus::Processing
+        }
+    }
+}
+
+fn parse_phase(s: Option<&str>, job_id: &str) -> JobPhase {
+    match s {
+        Some("queued") => JobPhase::Queued,
+        Some("processing") => JobPhase::Processing,
+        Some("extract_variables") => JobPhase::ExtractVariables,
+        Some("categorizing") => JobPhase::Categorizing,
+        Some("substituting") => JobPhase::Substituting,
+        Some("storing") => JobPhase::Storing,
+        Some("creating_symlinks") => JobPhase::CreatingSymlinks,
+        Some("archiving") => JobPhase::Archiving,
+        Some("completed") => JobPhase::Completed,
+        Some("failed") => JobPhase::Failed,
+        None => JobPhase::Queued,
+        Some(other) => {
+            log::warn!(
+                "Unknown job phase '{}' for job {}, defaulting to Queued",
+                other,
+                job_id
+            );
+            JobPhase::Queued
+        }
+    }
+}
+
+fn parse_timestamp(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|e| {
+            log::warn!("parse_timestamp: failed to parse '{}': {}", s, e);
+            Utc::now()
+        })
+}
+
+fn format_timestamp(dt: DateTime<Utc>) -> String {
+    dt.to_rfc3339()
+}
+
+// ─── StoredJob ──────────────────────────────────────────────────────────────
 
 /// A stored job with full history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +114,7 @@ pub struct StoredJob {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_path: Option<String>,
     /// Created symlinks.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub symlinks: Vec<String>,
     /// Detected category.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,9 +136,6 @@ pub struct StoredJob {
     /// MIME type of the source file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
-    /// Extracted text content (from OCR or embedded text).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ocr_text: Option<String>,
 }
 
 impl StoredJob {
@@ -90,76 +163,43 @@ impl StoredJob {
             source_name: event.source_name.clone(),
             ignored: false,
             mime_type: event.mime_type.clone(),
-            ocr_text: event.ocr_text.clone(),
         }
     }
 
-    /// Creates a StoredJob from a database model.
-    pub fn from_db_model(model: &job::Model) -> Self {
-        let status = match model.status.as_str() {
-            "completed" => JobStatus::Completed,
-            "failed" => JobStatus::Failed,
-            "ignored" => JobStatus::Completed,
-            "processing" => JobStatus::Processing,
-            "superseded" => JobStatus::Completed, // Treat superseded as completed for display
-            unknown => {
-                log::warn!(
-                    "Unknown job status '{}' for job {}, defaulting to Processing",
-                    unknown,
-                    model.id
-                );
-                JobStatus::Processing
-            }
-        };
-
-        let phase = match model.current_phase.as_deref() {
-            Some("queued") => JobPhase::Queued,
-            Some("processing") => JobPhase::Processing,
-            Some("extract_variables") => JobPhase::ExtractVariables,
-            Some("categorizing") => JobPhase::Categorizing,
-            Some("substituting") => JobPhase::Substituting,
-            Some("storing") => JobPhase::Storing,
-            Some("creating_symlinks") => JobPhase::CreatingSymlinks,
-            Some("archiving") => JobPhase::Archiving,
-            Some("completed") => JobPhase::Completed,
-            Some("failed") => JobPhase::Failed,
-            None => JobPhase::Queued,
-            Some(unknown) => {
-                log::warn!(
-                    "Unknown job phase '{}' for job {}, defaulting to Queued",
-                    unknown,
-                    model.id
-                );
-                JobPhase::Queued
-            }
-        };
-
-        let symlinks: Vec<String> = model
+    /// Creates a StoredJob from a database row.
+    pub fn from_job_row(row: &JobRow) -> Self {
+        let status = parse_status(&row.status, &row.id);
+        let phase = parse_phase(row.current_phase.as_deref(), &row.id);
+        let symlinks: Vec<String> = row
             .symlinks
             .as_ref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
-
-        let ignored = model.status == "ignored";
+        let ignored = row.status == "ignored";
+        let started_at = parse_timestamp(&row.created_at);
+        let completed_at = row.completed_at.as_ref().map(|s| parse_timestamp(s));
 
         Self {
-            job_id: model.id.clone(),
-            filename: model.filename.clone(),
+            job_id: row.id.clone(),
+            filename: row.filename.clone(),
             status,
             current_phase: phase,
-            started_at: model.created_at,
-            completed_at: model.completed_at,
-            output_path: model.output_path.clone(),
-            archive_path: model.archive_path.clone(),
+            started_at,
+            completed_at,
+            output_path: row.output_path.clone(),
+            archive_path: row.archive_path.clone(),
             symlinks,
-            category: Some(model.category.clone()),
-            error: model.error.clone(),
-            message: model.message.clone().unwrap_or_default(),
-            source_path: Some(model.source_path.clone()),
-            source_name: model.source_name.clone(),
+            category: if row.category.trim().is_empty() {
+                None
+            } else {
+                Some(row.category.clone())
+            },
+            error: row.error.clone(),
+            message: row.message.clone().unwrap_or_default(),
+            source_path: Some(row.source_path.clone()),
+            source_name: row.source_name.clone(),
             ignored,
-            mime_type: model.mime_type.clone(),
-            ocr_text: model.ocr_text.clone(),
+            mime_type: row.mime_type.clone(),
         }
     }
 
@@ -169,12 +209,10 @@ impl StoredJob {
         self.current_phase = event.phase.clone();
         self.message = event.message.clone();
 
-        // Update completion time if finished
         if matches!(event.status, JobStatus::Completed | JobStatus::Failed) {
             self.completed_at = Some(event.timestamp);
         }
 
-        // Update completion fields
         if event.output_path.is_some() {
             self.output_path = event.output_path.clone();
         }
@@ -190,9 +228,6 @@ impl StoredJob {
         if event.error.is_some() {
             self.error = event.error.clone();
         }
-        if event.ocr_text.is_some() {
-            self.ocr_text = event.ocr_text.clone();
-        }
     }
 
     /// Returns true if this job is finished (completed or failed).
@@ -200,6 +235,8 @@ impl StoredJob {
         matches!(self.status, JobStatus::Completed | JobStatus::Failed)
     }
 }
+
+// ─── Query types ────────────────────────────────────────────────────────────
 
 /// Query parameters for job listing.
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -220,45 +257,60 @@ pub struct JobQueryParams {
 pub struct JobListResponse {
     pub jobs: Vec<StoredJob>,
     pub total: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<u64>,
 }
 
-/// Persistent job store backed by SeaORM database.
+// ─── JobStore ───────────────────────────────────────────────────────────────
+
+/// Persistent job store backed by rusqlite.
 ///
-/// Uses std::sync::RwLock for the cache (fast, synchronous access)
-/// and tokio::sync::RwLock for the database connection (async operations).
+/// Uses `std::sync::RwLock` for both database handle and cache.
+/// All database operations are synchronous and sub-millisecond.
 pub struct JobStore {
-    /// Database connection (async access).
-    db: Arc<TokioRwLock<Option<DatabaseConnection>>>,
-    /// In-memory cache for real-time updates (synchronous access).
-    cache: Arc<StdRwLock<HashMap<String, StoredJob>>>,
+    /// Database handle (clone is cheap — inner `Arc`).
+    db: RwLock<Option<Database>>,
+    /// In-memory cache for real-time updates.
+    cache: RwLock<HashMap<String, StoredJob>>,
 }
 
 impl JobStore {
     /// Creates a new job store.
     pub fn new(_max_completed: usize) -> Self {
         Self {
-            db: Arc::new(TokioRwLock::new(None)),
-            cache: Arc::new(StdRwLock::new(HashMap::new())),
+            db: RwLock::new(None),
+            cache: RwLock::new(HashMap::new()),
         }
     }
 
     /// Sets the database connection.
-    pub async fn set_database(&self, db: DatabaseConnection) {
-        let mut db_lock = self.db.write().await;
-        *db_lock = Some(db);
+    pub fn set_database(&self, db: Database) {
+        let mut guard = match self.db.write() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                log::warn!("Job store DB lock was poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        *guard = Some(db);
     }
 
-    /// Gets a cloned database connection if available.
-    /// DatabaseConnection is internally Arc-based, so cloning is cheap.
-    pub async fn get_database(&self) -> Option<DatabaseConnection> {
-        let db = self.db.read().await;
-        db.as_ref().cloned()
+    /// Gets a cloned database handle if available.
+    /// Database is internally `Arc`-based, so cloning is cheap.
+    pub fn get_database(&self) -> Option<Database> {
+        let guard = match self.db.read() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                log::warn!("Job store DB lock was poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        guard.clone()
     }
 
-    /// Updates the store with a progress event (synchronous).
-    /// This only updates the in-memory cache, not the database.
+    /// Updates the in-memory cache with a progress event.
     pub fn update(&self, event: &JobProgressEvent) {
         if let Ok(mut cache) = self.cache.write() {
             if let Some(job) = cache.get_mut(&event.job_id) {
@@ -269,86 +321,57 @@ impl JobStore {
         }
     }
 
-    /// Updates the store with a progress event and persists to database.
-    pub async fn update_and_persist(&self, event: &JobProgressEvent) {
-        // Update cache synchronously
+    /// Updates the cache and persists to database.
+    pub fn update_and_persist(&self, event: &JobProgressEvent) {
+        // Update cache first
         self.update(event);
 
-        // Persist to database asynchronously
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            if let Err(e) = self.persist_event(conn, event).await {
+        // Persist to database
+        if let Some(db) = self.get_database() {
+            if let Err(e) = self.persist_event(&db, event) {
                 log::error!("Failed to persist job event to database: {}", e);
             }
         }
     }
 
     /// Persists a job progress event to the database.
-    async fn persist_event(
-        &self,
-        conn: &DatabaseConnection,
-        event: &JobProgressEvent,
-    ) -> Result<(), sea_orm::DbErr> {
-        use crate::db::entities::job::Entity as Job;
-
-        let status = match event.status {
-            JobStatus::Processing => "processing",
-            JobStatus::Completed => "completed",
-            JobStatus::Failed => "failed",
-        };
-
-        let phase = match event.phase {
-            JobPhase::Queued => "queued",
-            JobPhase::Processing => "processing",
-            JobPhase::ExtractVariables => "extract_variables",
-            JobPhase::Categorizing => "categorizing",
-            JobPhase::Substituting => "substituting",
-            JobPhase::Storing => "storing",
-            JobPhase::CreatingSymlinks => "creating_symlinks",
-            JobPhase::Archiving => "archiving",
-            JobPhase::Completed => "completed",
-            JobPhase::Failed => "failed",
-        };
-
+    fn persist_event(&self, db: &Database, event: &JobProgressEvent) -> Result<(), DatabaseError> {
+        let now = format_timestamp(Utc::now());
+        let status = status_to_str(&event.status);
+        let phase = phase_to_str(&event.phase);
         let symlinks_json = serde_json::to_string(&event.symlinks).ok();
 
-        // Check if job exists
-        let existing = Job::find_by_id(&event.job_id).one(conn).await?;
+        let existing = job_repo::find_by_id(db, &event.job_id)?;
 
-        if let Some(existing) = existing {
-            // Update existing job using into_active_model to preserve unchanged fields
-            let mut active: job::ActiveModel = existing.into();
-            active.status = Set(status.to_string());
-            active.current_phase = Set(Some(phase.to_string()));
-            active.message = Set(Some(event.message.clone()));
-            active.updated_at = Set(Utc::now());
+        if let Some(mut row) = existing {
+            // Update existing job
+            row.status = status.to_string();
+            row.current_phase = Some(phase.to_string());
+            row.message = Some(event.message.clone());
+            row.updated_at = now;
 
             if let Some(ref output_path) = event.output_path {
-                active.output_path = Set(Some(output_path.clone()));
+                row.output_path = Some(output_path.clone());
             }
             if let Some(ref archive_path) = event.archive_path {
-                active.archive_path = Set(Some(archive_path.clone()));
+                row.archive_path = Some(archive_path.clone());
             }
             if let Some(ref category) = event.category {
-                active.category = Set(category.clone());
+                row.category = category.clone();
             }
             if let Some(ref error) = event.error {
-                active.error = Set(Some(error.clone()));
+                row.error = Some(error.clone());
             }
             if !event.symlinks.is_empty() {
-                active.symlinks = Set(symlinks_json);
+                row.symlinks = symlinks_json;
             }
             if matches!(event.status, JobStatus::Completed | JobStatus::Failed) {
-                active.completed_at = Set(Some(event.timestamp));
-            }
-            if let Some(ref ocr_text) = event.ocr_text {
-                active.ocr_text = Set(Some(ocr_text.clone()));
+                row.completed_at = Some(format_timestamp(event.timestamp));
             }
 
-            active.update(conn).await?;
+            job_repo::update(db, &row)?;
         } else {
             // Insert new job
-            // source_path is required for valid jobs - return error if missing
             let source_path = match &event.source_path {
                 Some(path) => path.clone(),
                 None => {
@@ -356,49 +379,79 @@ impl JobStore {
                         "Job {} has no source_path - cannot persist to database",
                         event.job_id
                     );
-                    return Err(sea_orm::DbErr::Custom(format!(
-                        "Job {} missing required source_path",
-                        event.job_id
-                    )));
+                    return Ok(());
                 }
             };
-            let new_job = job::ActiveModel {
-                id: Set(event.job_id.clone()),
-                filename: Set(event.filename.clone()),
-                source_path: Set(source_path),
-                archive_path: Set(event.archive_path.clone()),
-                output_path: Set(event.output_path.clone()),
-                category: Set(event
-                    .category
-                    .clone()
-                    .unwrap_or_else(|| "unsorted".to_string())),
-                source_name: Set(event.source_name.clone()),
-                status: Set(status.to_string()),
-                error: Set(event.error.clone()),
-                created_at: Set(event.timestamp),
-                updated_at: Set(event.timestamp),
-                completed_at: Set(
-                    if matches!(event.status, JobStatus::Completed | JobStatus::Failed) {
-                        Some(event.timestamp)
-                    } else {
-                        None
-                    },
-                ),
-                symlinks: Set(symlinks_json),
-                current_phase: Set(Some(phase.to_string())),
-                message: Set(Some(event.message.clone())),
-                mime_type: Set(event.mime_type.clone()),
-                ocr_text: Set(event.ocr_text.clone()),
+
+            let completed_at = if matches!(event.status, JobStatus::Completed | JobStatus::Failed) {
+                Some(format_timestamp(event.timestamp))
+            } else {
+                None
             };
 
-            new_job.insert(conn).await?;
+            let row = JobRow {
+                id: event.job_id.clone(),
+                filename: event.filename.clone(),
+                source_path,
+                archive_path: event.archive_path.clone(),
+                output_path: event.output_path.clone(),
+                category: event
+                    .category
+                    .clone()
+                    .unwrap_or_else(|| "unsorted".to_string()),
+                source_name: event.source_name.clone(),
+                status: status.to_string(),
+                error: event.error.clone(),
+                created_at: format_timestamp(event.timestamp),
+                updated_at: now,
+                completed_at,
+                symlinks: symlinks_json,
+                current_phase: Some(phase.to_string()),
+                message: Some(event.message.clone()),
+                mime_type: event.mime_type.clone(),
+            };
+
+            job_repo::insert(db, &row)?;
+        }
+
+        // Record statistics on completion/failure
+        if matches!(event.status, JobStatus::Completed | JobStatus::Failed) {
+            self.record_stats(db, event);
         }
 
         Ok(())
     }
 
-    /// Returns all jobs sorted by started_at (newest first).
-    /// This is synchronous and safe to call from any context.
+    /// Records processing statistics for a completed/failed job.
+    fn record_stats(&self, db: &Database, event: &JobProgressEvent) {
+        let duration_ms = self
+            .cache
+            .read()
+            .ok()
+            .and_then(|cache| {
+                cache
+                    .get(&event.job_id)
+                    .map(|job| (event.timestamp - job.started_at).num_milliseconds())
+            })
+            .unwrap_or(0);
+
+        let date = event.timestamp.format("%Y-%m-%d").to_string();
+        let succeeded = matches!(event.status, JobStatus::Completed);
+
+        if let Err(e) = stats_repo::record_job_completion(
+            db,
+            &date,
+            event.category.as_deref(),
+            event.source_name.as_deref(),
+            event.mime_type.as_deref(),
+            succeeded,
+            duration_ms,
+        ) {
+            log::error!("Failed to record job statistics: {}", e);
+        }
+    }
+
+    /// Returns all jobs sorted by started_at (newest first) from cache.
     pub fn get_all(&self) -> Vec<StoredJob> {
         let cache = match self.cache.read() {
             Ok(guard) => guard,
@@ -412,131 +465,71 @@ impl JobStore {
         result
     }
 
-    /// Returns all jobs asynchronously, including from database.
-    pub async fn get_all_async(&self) -> Vec<StoredJob> {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            match self.query_jobs(conn, &JobQueryParams::default()).await {
-                Ok(response) => return response.jobs,
+    /// Returns all jobs, preferring database when available.
+    pub fn get_all_from_db(&self) -> Vec<StoredJob> {
+        if let Some(db) = self.get_database() {
+            let filter = JobFilter {
+                exclude_status: Some("superseded".to_string()),
+                ..Default::default()
+            };
+            match job_repo::query(&db, &filter) {
+                Ok((rows, _)) => return rows.iter().map(StoredJob::from_job_row).collect(),
                 Err(e) => log::error!("Failed to query jobs from database: {}", e),
             }
         }
-
-        // Fall back to cache
         self.get_all()
     }
 
     /// Query jobs with filters and pagination.
-    pub async fn query(&self, params: &JobQueryParams) -> Result<JobListResponse, sea_orm::DbErr> {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            self.query_jobs(conn, params).await
-        } else {
-            // Return cached jobs if no database
-            let cache = match self.cache.read() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!("Job store cache lock was poisoned, recovering");
-                    poisoned.into_inner()
-                }
+    pub fn query(&self, params: &JobQueryParams) -> Result<JobListResponse, DatabaseError> {
+        if let Some(db) = self.get_database() {
+            let filter = JobFilter {
+                status: params.status.clone(),
+                category: params.category.clone(),
+                source_name: params.source_name.clone(),
+                from_date: params.from_date.clone(),
+                to_date: params.to_date.clone(),
+                exclude_status: Some("superseded".to_string()),
+                limit: params.limit,
+                offset: params.offset,
             };
-            let mut jobs: Vec<StoredJob> = cache.values().cloned().collect();
-
-            // Apply basic filters
-            if let Some(ref status) = params.status {
-                jobs.retain(|j| {
-                    let job_status = match j.status {
-                        JobStatus::Processing => "processing",
-                        JobStatus::Completed => "completed",
-                        JobStatus::Failed => "failed",
-                    };
-                    job_status == status
-                });
-            }
-            if let Some(ref category) = params.category {
-                jobs.retain(|j| j.category.as_deref() == Some(category.as_str()));
-            }
-
-            jobs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-
-            let total = jobs.len() as u64;
-            let offset = params.offset.unwrap_or(0) as usize;
-            let limit = params.limit.unwrap_or(100) as usize;
-
-            let jobs: Vec<StoredJob> = jobs.into_iter().skip(offset).take(limit).collect();
-
+            let (rows, total) = job_repo::query(&db, &filter)?;
+            let jobs = rows.iter().map(StoredJob::from_job_row).collect();
             Ok(JobListResponse {
                 jobs,
                 total,
                 limit: params.limit,
                 offset: params.offset,
             })
+        } else {
+            self.query_cache(params)
         }
     }
 
-    /// Query jobs from database.
-    async fn query_jobs(
-        &self,
-        conn: &DatabaseConnection,
-        params: &JobQueryParams,
-    ) -> Result<JobListResponse, sea_orm::DbErr> {
-        use crate::db::entities::job::{Column, Entity as Job};
+    /// Falls back to querying the in-memory cache.
+    fn query_cache(&self, params: &JobQueryParams) -> Result<JobListResponse, DatabaseError> {
+        let cache = match self.cache.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Job store cache lock was poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
+        let mut jobs: Vec<StoredJob> = cache.values().cloned().collect();
 
-        let mut query = Job::find();
-
-        // Apply filters
         if let Some(ref status) = params.status {
-            query = query.filter(Column::Status.eq(status.as_str()));
+            jobs.retain(|j| status_to_str(&j.status) == status);
         }
         if let Some(ref category) = params.category {
-            query = query.filter(Column::Category.eq(category.as_str()));
-        }
-        if let Some(ref source_name) = params.source_name {
-            query = query.filter(Column::SourceName.eq(source_name.as_str()));
-        }
-        if let Some(ref from_date) = params.from_date {
-            match DateTime::parse_from_rfc3339(from_date) {
-                Ok(dt) => query = query.filter(Column::CreatedAt.gte(dt.with_timezone(&Utc))),
-                Err(e) => {
-                    log::warn!("Invalid from_date '{}': {}", from_date, e);
-                    return Err(sea_orm::DbErr::Custom(format!(
-                        "Invalid from_date format: {}",
-                        from_date
-                    )));
-                }
-            }
-        }
-        if let Some(ref to_date) = params.to_date {
-            match DateTime::parse_from_rfc3339(to_date) {
-                Ok(dt) => query = query.filter(Column::CreatedAt.lte(dt.with_timezone(&Utc))),
-                Err(e) => {
-                    log::warn!("Invalid to_date '{}': {}", to_date, e);
-                    return Err(sea_orm::DbErr::Custom(format!(
-                        "Invalid to_date format: {}",
-                        to_date
-                    )));
-                }
-            }
+            jobs.retain(|j| j.category.as_deref() == Some(category.as_str()));
         }
 
-        // Don't show superseded jobs by default
-        query = query.filter(Column::Status.ne("superseded"));
+        jobs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
 
-        // Count total before pagination
-        let total = query.clone().count(conn).await?;
-
-        // Apply pagination and ordering
-        let offset = params.offset.unwrap_or(0);
-        let limit = params.limit.unwrap_or(100);
-
-        let models = query
-            .order_by_desc(Column::CreatedAt)
-            .offset(offset)
-            .limit(limit)
-            .all(conn)
-            .await?;
-
-        let jobs: Vec<StoredJob> = models.iter().map(StoredJob::from_db_model).collect();
+        let total = jobs.len() as u64;
+        let offset = params.offset.unwrap_or(0) as usize;
+        let limit = params.limit.unwrap_or(100) as usize;
+        let jobs: Vec<StoredJob> = jobs.into_iter().skip(offset).take(limit).collect();
 
         Ok(JobListResponse {
             jobs,
@@ -546,7 +539,7 @@ impl JobStore {
         })
     }
 
-    /// Returns a specific job by ID (synchronous, from cache).
+    /// Returns a specific job by ID (from cache).
     pub fn get(&self, job_id: &str) -> Option<StoredJob> {
         let cache = match self.cache.read() {
             Ok(guard) => guard,
@@ -558,22 +551,16 @@ impl JobStore {
         cache.get(job_id).cloned()
     }
 
-    /// Returns a specific job by ID asynchronously (checks database too).
-    pub async fn get_async(&self, job_id: &str) -> Option<StoredJob> {
-        // Check cache first
+    /// Returns a specific job by ID, checking cache then database.
+    pub fn get_with_fallback(&self, job_id: &str) -> Option<StoredJob> {
         if let Some(job) = self.get(job_id) {
             return Some(job);
         }
-
-        // Check database
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            use crate::db::entities::job::Entity as Job;
-            if let Ok(Some(model)) = Job::find_by_id(job_id).one(conn).await {
-                return Some(StoredJob::from_db_model(&model));
+        if let Some(db) = self.get_database() {
+            if let Ok(Some(row)) = job_repo::find_by_id(&db, job_id) {
+                return Some(StoredJob::from_job_row(&row));
             }
         }
-
         None
     }
 
@@ -593,7 +580,7 @@ impl JobStore {
             .collect()
     }
 
-    /// Returns the count of jobs by status.
+    /// Returns the count of jobs by status (from cache).
     pub fn counts(&self) -> (usize, usize, usize) {
         let cache = match self.cache.read() {
             Ok(guard) => guard,
@@ -617,30 +604,12 @@ impl JobStore {
         (processing, completed, failed)
     }
 
-    /// Returns counts asynchronously from database.
-    pub async fn counts_async(&self) -> (u64, u64, u64) {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            use crate::db::entities::job::{Column, Entity as Job};
-
-            let processing = Job::find()
-                .filter(Column::Status.eq("processing"))
-                .count(conn)
-                .await
-                .unwrap_or(0);
-
-            let completed = Job::find()
-                .filter(Column::Status.eq("completed"))
-                .count(conn)
-                .await
-                .unwrap_or(0);
-
-            let failed = Job::find()
-                .filter(Column::Status.eq("failed"))
-                .count(conn)
-                .await
-                .unwrap_or(0);
-
+    /// Returns counts from database when available.
+    pub fn counts_from_db(&self) -> (u64, u64, u64) {
+        if let Some(db) = self.get_database() {
+            let processing = job_repo::count_by_status(&db, "processing").unwrap_or(0);
+            let completed = job_repo::count_by_status(&db, "completed").unwrap_or(0);
+            let failed = job_repo::count_by_status(&db, "failed").unwrap_or(0);
             (processing, completed, failed)
         } else {
             let (p, c, f) = self.counts();
@@ -649,26 +618,12 @@ impl JobStore {
     }
 
     /// Marks a job as superseded (for re-run).
-    pub async fn mark_superseded(&self, job_id: &str) -> Result<(), sea_orm::DbErr> {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            use crate::db::entities::job::{Column, Entity as Job};
-
-            Job::update_many()
-                .col_expr(
-                    Column::Status,
-                    sea_orm::sea_query::Expr::value("superseded"),
-                )
-                .col_expr(
-                    Column::UpdatedAt,
-                    sea_orm::sea_query::Expr::value(Utc::now()),
-                )
-                .filter(Column::Id.eq(job_id))
-                .exec(conn)
-                .await?;
+    pub fn mark_superseded(&self, job_id: &str) -> Result<(), DatabaseError> {
+        if let Some(db) = self.get_database() {
+            let now = format_timestamp(Utc::now());
+            job_repo::update_status(&db, job_id, "superseded", &now)?;
         }
 
-        // Also update cache
         if let Ok(mut cache) = self.cache.write() {
             cache.remove(job_id);
         }
@@ -677,71 +632,62 @@ impl JobStore {
     }
 
     /// Marks a job as ignored.
-    pub async fn mark_ignored(&self, job_id: &str) -> Result<Option<StoredJob>, sea_orm::DbErr> {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            use crate::db::entities::job::{Column, Entity as Job};
-
-            Job::update_many()
-                .col_expr(Column::Status, sea_orm::sea_query::Expr::value("ignored"))
-                .col_expr(
-                    Column::UpdatedAt,
-                    sea_orm::sea_query::Expr::value(Utc::now()),
-                )
-                .filter(Column::Id.eq(job_id))
-                .exec(conn)
-                .await?;
+    pub fn mark_ignored(&self, job_id: &str) -> Result<Option<StoredJob>, DatabaseError> {
+        if let Some(db) = self.get_database() {
+            let now = format_timestamp(Utc::now());
+            job_repo::update_status(&db, job_id, "ignored", &now)?;
         }
 
         // Update cache
         if let Ok(mut cache) = self.cache.write() {
             if let Some(job) = cache.get_mut(job_id) {
                 job.ignored = true;
-                job.status = JobStatus::Completed; // "ignored" is a variant of completed
+                job.status = JobStatus::Completed;
                 return Ok(Some(job.clone()));
             }
-        } else {
-            log::warn!("Failed to acquire cache write lock for job {}", job_id);
         }
 
-        // If not in cache, fetch from db
-        drop(db);
-        Ok(self.get_async(job_id).await)
+        // If not in cache, try database
+        Ok(self.get_with_fallback(job_id))
     }
 
     /// Inserts a new job directly (for re-run jobs).
-    pub async fn insert_job(
+    pub fn insert_job(
         &self,
         job_id: &str,
         filename: &str,
         source_path: &str,
         source_name: Option<&str>,
         mime_type: Option<&str>,
-    ) -> Result<(), sea_orm::DbErr> {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            let now = Utc::now();
-            let new_job = job::ActiveModel {
-                id: Set(job_id.to_string()),
-                filename: Set(filename.to_string()),
-                source_path: Set(source_path.to_string()),
-                archive_path: Set(None),
-                output_path: Set(None),
-                category: Set("unsorted".to_string()),
-                source_name: Set(source_name.map(|s| s.to_string())),
-                status: Set("processing".to_string()),
-                error: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-                completed_at: Set(None),
-                symlinks: Set(None),
-                current_phase: Set(Some("queued".to_string())),
-                message: Set(Some("Job queued for processing".to_string())),
-                mime_type: Set(mime_type.map(|s| s.to_string())),
-                ocr_text: Set(None),
-            };
+    ) -> Result<(), DatabaseError> {
+        let now = Utc::now();
+        let now_str = format_timestamp(now);
 
-            new_job.insert(conn).await?;
+        if let Some(db) = self.get_database() {
+            let row = JobRow {
+                id: job_id.to_string(),
+                filename: filename.to_string(),
+                source_path: source_path.to_string(),
+                archive_path: None,
+                output_path: None,
+                category: "unsorted".to_string(),
+                source_name: source_name.map(|s| s.to_string()),
+                status: "processing".to_string(),
+                error: None,
+                created_at: now_str.clone(),
+                updated_at: now_str,
+                completed_at: None,
+                symlinks: None,
+                current_phase: Some("queued".to_string()),
+                message: Some("Job queued for processing".to_string()),
+                mime_type: mime_type.map(|s| s.to_string()),
+            };
+            job_repo::insert(&db, &row)?;
+        } else {
+            log::warn!(
+                "insert_job: database not available, job {} only cached",
+                job_id
+            );
         }
 
         // Also add to cache
@@ -751,7 +697,7 @@ impl JobStore {
                 filename: filename.to_string(),
                 status: JobStatus::Processing,
                 current_phase: JobPhase::Queued,
-                started_at: Utc::now(),
+                started_at: now,
                 completed_at: None,
                 output_path: None,
                 archive_path: None,
@@ -763,7 +709,6 @@ impl JobStore {
                 source_name: source_name.map(|s| s.to_string()),
                 ignored: false,
                 mime_type: mime_type.map(|s| s.to_string()),
-                ocr_text: None,
             };
             cache.insert(job_id.to_string(), job);
         }
@@ -772,50 +717,53 @@ impl JobStore {
     }
 
     /// Loads historical jobs from database into cache on startup.
-    pub async fn load_from_database(&self) {
-        let db = self.db.read().await;
-        if let Some(conn) = db.as_ref() {
-            use crate::db::entities::job::{Column, Entity as Job};
+    pub fn load_from_database(&self) {
+        let db = match self.get_database() {
+            Some(db) => db,
+            None => return,
+        };
 
-            let mut loaded_count = 0;
+        // Load all processing jobs (no limit)
+        let processing_result = job_repo::query(
+            &db,
+            &JobFilter {
+                status: Some("processing".to_string()),
+                ..Default::default()
+            },
+        );
 
-            // Load active (processing) jobs into cache
-            let processing_jobs = Job::find()
-                .filter(Column::Status.eq("processing"))
-                .order_by_desc(Column::CreatedAt)
-                .all(conn)
-                .await;
+        // Load recent non-superseded jobs
+        let recent_result = job_repo::query(
+            &db,
+            &JobFilter {
+                exclude_status: Some("superseded".to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        );
 
-            // Also load recent completed/failed jobs for display
-            let recent_jobs = Job::find()
-                .filter(Column::Status.ne("superseded"))
-                .filter(Column::Status.ne("processing"))
-                .order_by_desc(Column::CreatedAt)
-                .limit(100)
-                .all(conn)
-                .await;
-
-            // Acquire cache lock once and insert all jobs
-            if let Ok(mut cache) = self.cache.write() {
-                if let Ok(models) = processing_jobs {
-                    for model in models {
-                        let job = StoredJob::from_db_model(&model);
-                        cache.insert(job.job_id.clone(), job);
-                        loaded_count += 1;
-                    }
-                }
-
-                if let Ok(models) = recent_jobs {
-                    for model in models {
-                        let job = StoredJob::from_db_model(&model);
-                        cache.insert(job.job_id.clone(), job);
-                        loaded_count += 1;
-                    }
+        let mut loaded = 0;
+        if let Ok(mut cache) = self.cache.write() {
+            if let Ok((rows, _)) = processing_result {
+                for row in &rows {
+                    let job = StoredJob::from_job_row(row);
+                    cache.insert(job.job_id.clone(), job);
+                    loaded += 1;
                 }
             }
 
-            log::info!("Loaded {} jobs from database into cache", loaded_count);
+            if let Ok((rows, _)) = recent_result {
+                for row in &rows {
+                    if !cache.contains_key(&row.id) {
+                        let job = StoredJob::from_job_row(row);
+                        cache.insert(job.job_id.clone(), job);
+                        loaded += 1;
+                    }
+                }
+            }
         }
+
+        log::info!("Loaded {} jobs from database into cache", loaded);
     }
 }
 
@@ -833,6 +781,16 @@ mod tests {
         JobProgressEvent::new(job_id, "test.pdf", phase, "Test message")
     }
 
+    fn create_event_with_source(
+        job_id: &str,
+        phase: JobPhase,
+        source_path: &str,
+    ) -> JobProgressEvent {
+        let mut event = JobProgressEvent::new(job_id, "test.pdf", phase, "Test message");
+        event.source_path = Some(source_path.to_string());
+        event
+    }
+
     #[test]
     fn test_store_creation() {
         let store = JobStore::new(5);
@@ -848,6 +806,64 @@ mod tests {
         assert_eq!(job.filename, "test.pdf");
         assert_eq!(job.current_phase, JobPhase::Processing);
         assert_eq!(job.status, JobStatus::Processing);
+        assert!(!job.ignored);
+    }
+
+    #[test]
+    fn test_stored_job_from_job_row() {
+        let row = JobRow {
+            id: "row-1".to_string(),
+            filename: "invoice.pdf".to_string(),
+            source_path: "/tmp/invoice.pdf".to_string(),
+            archive_path: Some("/archive/invoice.pdf".to_string()),
+            output_path: Some("/output/invoice.pdf".to_string()),
+            category: "invoices".to_string(),
+            source_name: Some("inbox".to_string()),
+            status: "completed".to_string(),
+            error: None,
+            created_at: "2026-01-15T10:30:00+00:00".to_string(),
+            updated_at: "2026-01-15T10:31:00+00:00".to_string(),
+            completed_at: Some("2026-01-15T10:31:00+00:00".to_string()),
+            symlinks: Some(r#"["/link/invoice.pdf"]"#.to_string()),
+            current_phase: Some("completed".to_string()),
+            message: Some("Done".to_string()),
+            mime_type: Some("application/pdf".to_string()),
+        };
+
+        let job = StoredJob::from_job_row(&row);
+        assert_eq!(job.job_id, "row-1");
+        assert_eq!(job.status, JobStatus::Completed);
+        assert_eq!(job.current_phase, JobPhase::Completed);
+        assert_eq!(job.category.as_deref(), Some("invoices"));
+        assert_eq!(job.symlinks.len(), 1);
+        assert!(job.completed_at.is_some());
+        assert_eq!(job.mime_type.as_deref(), Some("application/pdf"));
+    }
+
+    #[test]
+    fn test_stored_job_from_job_row_ignored() {
+        let row = JobRow {
+            id: "ign-1".to_string(),
+            filename: "f.pdf".to_string(),
+            source_path: "/tmp/f.pdf".to_string(),
+            archive_path: None,
+            output_path: None,
+            category: "unsorted".to_string(),
+            source_name: None,
+            status: "ignored".to_string(),
+            error: None,
+            created_at: "2026-01-01T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-01T00:00:00+00:00".to_string(),
+            completed_at: None,
+            symlinks: None,
+            current_phase: None,
+            message: None,
+            mime_type: None,
+        };
+
+        let job = StoredJob::from_job_row(&row);
+        assert!(job.ignored);
+        assert_eq!(job.status, JobStatus::Completed);
     }
 
     #[test]
@@ -901,5 +917,226 @@ mod tests {
         assert_eq!(processing, 2);
         assert_eq!(completed, 1);
         assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn test_update_and_persist_with_db() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        // Insert a processing event
+        let mut event = create_event_with_source("db-1", JobPhase::Queued, "/tmp/test.pdf");
+        event.source_name = Some("inbox".to_string());
+        store.update_and_persist(&event);
+
+        // Verify it's in the DB
+        let row = job_repo::find_by_id(&db, "db-1").unwrap();
+        assert!(row.is_some());
+        let row = row.unwrap();
+        assert_eq!(row.status, "processing");
+        assert_eq!(row.source_path, "/tmp/test.pdf");
+
+        // Update to completed
+        let mut completion = create_event("db-1", JobPhase::Completed);
+        completion.status = JobStatus::Completed;
+        completion.output_path = Some("/output/test.pdf".to_string());
+        completion.category = Some("invoices".to_string());
+        store.update_and_persist(&completion);
+
+        // Verify update in DB
+        let row = job_repo::find_by_id(&db, "db-1").unwrap().unwrap();
+        assert_eq!(row.status, "completed");
+        assert_eq!(row.output_path.as_deref(), Some("/output/test.pdf"));
+        assert_eq!(row.category, "invoices");
+        assert!(row.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_query_with_db() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db);
+
+        // Insert some jobs
+        store
+            .insert_job("q1", "a.pdf", "/tmp/a.pdf", None, None)
+            .unwrap();
+        store
+            .insert_job("q2", "b.pdf", "/tmp/b.pdf", None, None)
+            .unwrap();
+
+        // Query all
+        let result = store.query(&JobQueryParams::default()).unwrap();
+        assert_eq!(result.total, 2);
+        assert_eq!(result.jobs.len(), 2);
+    }
+
+    #[test]
+    fn test_mark_superseded() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        store
+            .insert_job("sup-1", "f.pdf", "/tmp/f.pdf", None, None)
+            .unwrap();
+        assert!(store.get("sup-1").is_some());
+
+        store.mark_superseded("sup-1").unwrap();
+
+        // Removed from cache
+        assert!(store.get("sup-1").is_none());
+        // Updated in DB
+        let row = job_repo::find_by_id(&db, "sup-1").unwrap().unwrap();
+        assert_eq!(row.status, "superseded");
+    }
+
+    #[test]
+    fn test_mark_ignored() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        store
+            .insert_job("ign-1", "f.pdf", "/tmp/f.pdf", None, None)
+            .unwrap();
+
+        let result = store.mark_ignored("ign-1").unwrap();
+        assert!(result.is_some());
+        let job = result.unwrap();
+        assert!(job.ignored);
+        assert_eq!(job.status, JobStatus::Completed);
+
+        // DB should also reflect the change
+        let row = job_repo::find_by_id(&db, "ign-1").unwrap().unwrap();
+        assert_eq!(row.status, "ignored");
+    }
+
+    #[test]
+    fn test_insert_job() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        store
+            .insert_job(
+                "ins-1",
+                "doc.pdf",
+                "/tmp/doc.pdf",
+                Some("email-inbox"),
+                Some("application/pdf"),
+            )
+            .unwrap();
+
+        // Verify cache
+        let cached = store.get("ins-1").unwrap();
+        assert_eq!(cached.filename, "doc.pdf");
+        assert_eq!(cached.source_name.as_deref(), Some("email-inbox"));
+        assert_eq!(cached.mime_type.as_deref(), Some("application/pdf"));
+
+        // Verify DB
+        let row = job_repo::find_by_id(&db, "ins-1").unwrap().unwrap();
+        assert_eq!(row.filename, "doc.pdf");
+        assert_eq!(row.source_name.as_deref(), Some("email-inbox"));
+    }
+
+    #[test]
+    fn test_load_from_database() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+
+        // Insert directly into DB
+        let row = JobRow {
+            id: "load-1".to_string(),
+            filename: "loaded.pdf".to_string(),
+            source_path: "/tmp/loaded.pdf".to_string(),
+            archive_path: None,
+            output_path: None,
+            category: "unsorted".to_string(),
+            source_name: None,
+            status: "completed".to_string(),
+            error: None,
+            created_at: "2026-01-01T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-01T00:00:00+00:00".to_string(),
+            completed_at: Some("2026-01-01T00:01:00+00:00".to_string()),
+            symlinks: None,
+            current_phase: Some("completed".to_string()),
+            message: Some("Done".to_string()),
+            mime_type: None,
+        };
+        job_repo::insert(&db, &row).unwrap();
+
+        // Create store and load
+        let store = JobStore::new(10);
+        store.set_database(db);
+        store.load_from_database();
+
+        let cached = store.get("load-1");
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().filename, "loaded.pdf");
+    }
+
+    #[test]
+    fn test_stats_recording_on_completion() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        // Insert a processing job
+        let mut event = create_event_with_source("stats-1", JobPhase::Queued, "/tmp/stats.pdf");
+        event.source_name = Some("inbox".to_string());
+        event.mime_type = Some("application/pdf".to_string());
+        store.update_and_persist(&event);
+
+        // Complete it
+        let mut completion = create_event("stats-1", JobPhase::Completed);
+        completion.status = JobStatus::Completed;
+        completion.category = Some("invoices".to_string());
+        completion.source_name = Some("inbox".to_string());
+        completion.mime_type = Some("application/pdf".to_string());
+        store.update_and_persist(&completion);
+
+        // Verify stats were recorded
+        let stats = stats_repo::query(&db, None, None, None, None).unwrap();
+        assert!(!stats.is_empty());
+        assert_eq!(stats[0].total_processed, 1);
+        assert_eq!(stats[0].total_succeeded, 1);
+    }
+
+    #[test]
+    fn test_get_with_fallback() {
+        let db = Database::open_in_memory().expect("open in-memory DB");
+        let store = JobStore::new(10);
+        store.set_database(db.clone());
+
+        // Insert directly into DB (not in cache)
+        let row = JobRow {
+            id: "fb-1".to_string(),
+            filename: "fallback.pdf".to_string(),
+            source_path: "/tmp/fallback.pdf".to_string(),
+            archive_path: None,
+            output_path: None,
+            category: "unsorted".to_string(),
+            source_name: None,
+            status: "completed".to_string(),
+            error: None,
+            created_at: "2026-01-01T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-01T00:00:00+00:00".to_string(),
+            completed_at: None,
+            symlinks: None,
+            current_phase: None,
+            message: None,
+            mime_type: None,
+        };
+        job_repo::insert(&db, &row).unwrap();
+
+        // Cache miss, DB hit
+        assert!(store.get("fb-1").is_none());
+        let job = store.get_with_fallback("fb-1");
+        assert!(job.is_some());
+        assert_eq!(job.unwrap().filename, "fallback.pdf");
+
+        // Nonexistent
+        assert!(store.get_with_fallback("nonexistent").is_none());
     }
 }

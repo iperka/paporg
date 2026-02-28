@@ -68,8 +68,8 @@ impl From<async_native_tls::Error> for EmailError {
     }
 }
 
-impl From<sea_orm::DbErr> for EmailError {
-    fn from(err: sea_orm::DbErr) -> Self {
+impl From<crate::db::DatabaseError> for EmailError {
+    fn from(err: crate::db::DatabaseError) -> Self {
         EmailError::DatabaseError(err.to_string())
     }
 }

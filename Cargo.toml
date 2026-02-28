@@ -9,13 +9,14 @@ edition = "2021"
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.35", features = ["sync", "rt-multi-thread", "macros", "process", "io-util"] }
+tokio = { version = "1.35", features = ["sync", "rt-multi-thread", "macros", "process", "io-util", "fs"] }
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 tracing-log = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 thiserror = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [profile.release]
 lto = "thin"

@@ -14,6 +14,9 @@ pub enum PaporgError {
 
     #[error("Worker error: {0}")]
     Worker(#[from] WorkerError),
+
+    #[error("Database error: {0}")]
+    Database(#[from] crate::db::DatabaseError),
 }
 
 #[derive(Error, Debug)]

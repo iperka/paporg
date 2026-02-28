@@ -92,7 +92,7 @@ pub async fn start_event_bridge(app_handle: AppHandle) {
             match job_rx.recv().await {
                 Ok(event) => {
                     // Update the job store with the event and persist to database
-                    job_store.update_and_persist(&event).await;
+                    job_store.update_and_persist(&event);
 
                     // Emit to frontend
                     if let Err(e) = app_clone.emit(event_names::JOB_PROGRESS, &event) {

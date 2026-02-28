@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-mod db;
 mod events;
 mod state;
 mod tray;
@@ -51,19 +50,21 @@ fn open_log_file(config_dir: &std::path::Path) -> Option<std::fs::File> {
         .ok()
 }
 
-/// Initialize the SeaORM database connection for the JobStore.
-async fn init_job_store_database(
-    config_dir: &std::path::Path,
-    job_store: &paporg::broadcast::JobStore,
-) {
+/// Initialize the rusqlite database for the JobStore.
+fn init_job_store_database(job_store: &paporg::broadcast::JobStore) {
     let _span = tracing::info_span!("init_job_store_database").entered();
-    let db_url = paporg::db::default_database_path(config_dir);
-    match paporg::db::init_database(&db_url).await {
-        Ok(conn) => {
-            job_store.set_database(conn).await;
-            // Load existing jobs from database into cache
-            job_store.load_from_database().await;
-            info!("Job store database initialized successfully");
+    let db_path = match paporg::db::default_database_path() {
+        Some(p) => p,
+        None => {
+            tracing::error!("Could not determine database path");
+            return;
+        }
+    };
+    match paporg::db::Database::open(&db_path) {
+        Ok(db) => {
+            job_store.set_database(db);
+            job_store.load_from_database();
+            info!("Job store database initialized at {}", db_path.display());
         }
         Err(e) => {
             tracing::error!("Failed to initialize job store database: {}", e);
@@ -87,7 +88,7 @@ fn main() {
     // Create log broadcaster early so we can wire it into the tracing subscriber
     let log_broadcaster = Arc::new(paporg::LogBroadcaster::default());
 
-    // Bridge log:: macros from third-party crates (sea-orm, notify, etc.) into tracing
+    // Bridge log:: macros from third-party crates (notify, rusqlite, etc.) into tracing
     tracing_log::LogTracer::init().expect("Failed to initialize LogTracer");
 
     // Build env filter — honours RUST_LOG, defaults to info
@@ -156,11 +157,7 @@ fn main() {
         ))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:paporg.db", db::migrations())
-                .build(),
-        )
+        .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
@@ -212,9 +209,9 @@ fn main() {
                 tracing::warn!("Could not determine default config directory");
             }
 
-            // Get a reference to job_store and config_dir for database initialization
+            // Initialize job store database (sync — must happen before event bridge)
             let job_store = state.job_store.clone();
-            let db_config_dir = state.config_dir.clone();
+            init_job_store_database(&job_store);
 
             app.manage(Arc::new(RwLock::new(state)));
 
@@ -233,14 +230,6 @@ fn main() {
                     let _ = window.set_effects(effects);
                     info!("Applied macOS vibrancy effect");
                 }
-            }
-
-            // Initialize job store database (blocking to ensure DB is ready before event bridge starts)
-            if let Some(config_dir) = db_config_dir {
-                let job_store_clone = job_store.clone();
-                tauri::async_runtime::block_on(async move {
-                    init_job_store_database(&config_dir, &job_store_clone).await;
-                });
             }
 
             // Start event bridge
@@ -326,6 +315,9 @@ fn main() {
             // Upload commands
             commands::upload_files,
             commands::pick_and_upload_files,
+            // Database commands
+            commands::get_database_path,
+            commands::get_processing_stats,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

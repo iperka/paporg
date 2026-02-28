@@ -19,7 +19,6 @@ interface TauriJobProgressEvent {
   archivePath?: string
   symlinks?: string[]
   error?: string
-  ocrText?: string
   timestamp?: string
 }
 
@@ -61,7 +60,6 @@ function storedJobFromTauriEvent(event: TauriJobProgressEvent): StoredJob {
     message: event.message,
     symlinks: event.symlinks || [],
     sourcePath: event.sourcePath,
-    ocrText: event.ocrText,
   }
 }
 
@@ -78,7 +76,6 @@ function updateJobFromTauriEvent(existing: StoredJob, event: TauriJobProgressEve
     symlinks: event.symlinks?.length ? event.symlinks : existing.symlinks,
     category: event.category ?? existing.category,
     error: event.error ?? existing.error,
-    ocrText: event.ocrText ?? existing.ocrText,
   }
 }
 
@@ -101,7 +98,6 @@ function storedJobFromApi(apiJob: ApiStoredJob): StoredJob {
     message: apiJob.errorMessage || `Status: ${apiJob.status}`,
     symlinks: apiJob.symlinks || [],
     sourcePath: apiJob.sourcePath,
-    ocrText: apiJob.ocrText ?? undefined,
     sourceName: apiJob.sourceName ?? undefined,
     mimeType: apiJob.mimeType ?? undefined,
   }

@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::db::Database;
 use glob::Pattern;
 use notify::{Config as NotifyConfig, PollWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer_opt, Config as DebouncerConfig, DebouncedEventKind};
-use sea_orm::DatabaseConnection;
 use tracing::{debug, error, info, info_span, warn};
 use walkdir::WalkDir;
 
@@ -58,7 +58,7 @@ pub struct MultiSourceScanner {
     /// Temporary directory for saving email attachments.
     temp_dir: PathBuf,
     /// Database connection for email tracking.
-    db: Option<DatabaseConnection>,
+    db: Option<Database>,
 }
 
 impl MultiSourceScanner {
@@ -70,7 +70,7 @@ impl MultiSourceScanner {
     /// Creates a new multi-source scanner with optional database and temp directory.
     pub fn from_config_with_options(
         config: &LoadedConfig,
-        db: Option<DatabaseConnection>,
+        db: Option<Database>,
         temp_dir: Option<PathBuf>,
     ) -> Self {
         let mut sources = Vec::new();
@@ -703,8 +703,8 @@ mod tests {
         use crate::gitops::loader::LoadedConfig;
         use crate::gitops::resource::ResourceWithPath;
         use crate::gitops::resource::{
-            AiSettings, DefaultOutputSettings, GitSettings, ObjectMeta, OcrSettings, ReleaseChannel,
-            ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
+            AiSettings, DefaultOutputSettings, GitSettings, ObjectMeta, OcrSettings,
+            ReleaseChannel, ResourceKind, SettingsResource, SettingsSpec, API_VERSION,
         };
 
         let settings = SettingsResource {

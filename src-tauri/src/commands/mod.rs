@@ -15,6 +15,7 @@
 pub mod ai;
 pub mod analytics;
 pub mod config;
+pub mod database;
 pub mod email;
 pub mod files;
 pub mod git;
@@ -28,6 +29,7 @@ pub mod workers;
 pub use ai::*;
 pub use analytics::*;
 pub use config::*;
+pub use database::*;
 pub use email::*;
 pub use files::*;
 pub use git::*;

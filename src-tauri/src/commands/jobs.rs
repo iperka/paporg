@@ -41,7 +41,7 @@ pub async fn get_jobs(
     state: State<'_, Arc<RwLock<TauriAppState>>>,
 ) -> Result<ApiResponse<Vec<StoredJob>>, String> {
     let state = state.read().await;
-    let jobs = state.job_store.get_all_async().await;
+    let jobs = state.job_store.get_all_from_db();
     Ok(ApiResponse::ok(jobs))
 }
 
@@ -70,7 +70,7 @@ pub async fn query_jobs(
         offset,
     };
 
-    match state.job_store.query(&params).await {
+    match state.job_store.query(&params) {
         Ok(response) => Ok(ApiResponse::ok(response)),
         Err(e) => Ok(ApiResponse::err(format!("Database error: {}", e))),
     }
@@ -84,13 +84,13 @@ pub async fn get_job(
 ) -> Result<ApiResponse<StoredJob>, String> {
     let state = state.read().await;
 
-    match state.job_store.get_async(&job_id).await {
+    match state.job_store.get_with_fallback(&job_id) {
         Some(job) => Ok(ApiResponse::ok(job)),
         None => Ok(ApiResponse::err(format!("Job not found: {}", job_id))),
     }
 }
 
-/// Get OCR text for a job (returns cached text if available, falls back to re-processing).
+/// Get OCR text for a job (always re-processes from archive).
 #[tauri::command]
 pub async fn get_job_ocr(
     state: State<'_, Arc<RwLock<TauriAppState>>>,
@@ -99,21 +99,11 @@ pub async fn get_job_ocr(
     let state = state.read().await;
 
     // Get job from store
-    let job = match state.job_store.get_async(&job_id).await {
+    let job = match state.job_store.get_with_fallback(&job_id) {
         Some(j) => j,
         None => return Ok(ApiResponse::err("Job not found")),
     };
 
-    // Return cached OCR text if available (fast path)
-    if let Some(ref cached_text) = job.ocr_text {
-        if !cached_text.is_empty() {
-            return Ok(ApiResponse::ok(OcrResponse {
-                text: cached_text.clone(),
-            }));
-        }
-    }
-
-    // Fall back to re-processing if no cached text
     // Get archive path (source of truth)
     let archive_path = match &job.archive_path {
         Some(p) => PathBuf::from(p),
@@ -161,7 +151,7 @@ pub async fn rerun_job(
     let state = state.read().await;
 
     // Get job from store
-    let job = match state.job_store.get_async(&job_id).await {
+    let job = match state.job_store.get_with_fallback(&job_id) {
         Some(j) => j,
         None => return Ok(ApiResponse::err("Job not found")),
     };
@@ -184,7 +174,7 @@ pub async fn rerun_job(
     }
 
     // Mark old job as superseded
-    if let Err(e) = state.job_store.mark_superseded(&job_id).await {
+    if let Err(e) = state.job_store.mark_superseded(&job_id) {
         return Ok(ApiResponse::err(format!("Failed to update job: {}", e)));
     }
 
@@ -194,21 +184,17 @@ pub async fn rerun_job(
     let new_job_id = new_job.id.clone();
 
     // Insert new job record
-    if let Err(e) = state
-        .job_store
-        .insert_job(
-            &new_job.id,
-            &job.filename,
-            &archive_path.display().to_string(),
-            if source.is_empty() {
-                None
-            } else {
-                Some(&source)
-            },
-            job.mime_type.as_deref(),
-        )
-        .await
-    {
+    if let Err(e) = state.job_store.insert_job(
+        &new_job.id,
+        &job.filename,
+        &archive_path.display().to_string(),
+        if source.is_empty() {
+            None
+        } else {
+            Some(&source)
+        },
+        job.mime_type.as_deref(),
+    ) {
         return Ok(ApiResponse::err(format!("Failed to create job: {}", e)));
     }
 
@@ -234,7 +220,7 @@ pub async fn ignore_job(
 ) -> Result<ApiResponse<StoredJob>, String> {
     let state = state.read().await;
 
-    match state.job_store.mark_ignored(&job_id).await {
+    match state.job_store.mark_ignored(&job_id) {
         Ok(Some(job)) => Ok(ApiResponse::ok(job)),
         Ok(None) => Ok(ApiResponse::err(format!("Job not found: {}", job_id))),
         Err(e) => Ok(ApiResponse::err(format!("Database error: {}", e))),
@@ -256,7 +242,7 @@ pub async fn rerun_unsorted(
         ..Default::default()
     };
 
-    let unsorted = match state.job_store.query(&params).await {
+    let unsorted = match state.job_store.query(&params) {
         Ok(r) => r.jobs,
         Err(e) => return Ok(ApiResponse::err(format!("Database error: {}", e))),
     };
@@ -296,7 +282,7 @@ pub async fn rerun_unsorted(
             }
 
             // Mark old job as superseded
-            if let Err(e) = state.job_store.mark_superseded(&job.job_id).await {
+            if let Err(e) = state.job_store.mark_superseded(&job.job_id) {
                 log::error!("Failed to mark job {} as superseded: {}", job.job_id, e);
                 errors += 1;
                 continue;
@@ -307,21 +293,17 @@ pub async fn rerun_unsorted(
             let new_job = Job::new_with_source(archive_path.clone(), source_name.clone());
 
             // Insert new job record
-            if let Err(e) = state
-                .job_store
-                .insert_job(
-                    &new_job.id,
-                    &job.filename,
-                    &archive_path.display().to_string(),
-                    if source_name.is_empty() {
-                        None
-                    } else {
-                        Some(&source_name)
-                    },
-                    job.mime_type.as_deref(),
-                )
-                .await
-            {
+            if let Err(e) = state.job_store.insert_job(
+                &new_job.id,
+                &job.filename,
+                &archive_path.display().to_string(),
+                if source_name.is_empty() {
+                    None
+                } else {
+                    Some(&source_name)
+                },
+                job.mime_type.as_deref(),
+            ) {
                 log::error!("Failed to insert job record: {}", e);
                 errors += 1;
                 continue;
