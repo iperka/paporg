@@ -170,9 +170,6 @@ export type ImportSourceResource = Resource<ImportSourceSpec>
 // Any resource union type
 export type AnyResource = SettingsResource | VariableResource | RuleResource | ImportSourceResource
 
-// Re-export ApiResponse from shared module
-export type { ApiResponse } from './api'
-
 export interface ResourceListResponse {
   kind: string
   items: ResourceSummary[]

@@ -90,9 +90,6 @@ export interface RerunResult {
   errors: number
 }
 
-// Re-export ApiResponse from shared module
-export type { ApiResponse } from './api'
-
 export function getPhaseLabel(phase: JobPhase): string {
   switch (phase) {
     case 'queued':

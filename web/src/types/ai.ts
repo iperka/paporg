@@ -59,6 +59,3 @@ export interface RuleSuggestion {
   /** Values to add to the existing rule (for containsAny updates). */
   addValues?: string[]
 }
-
-// Re-export ApiResponse from shared module
-export type { ApiResponse } from './api'
