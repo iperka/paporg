@@ -15,7 +15,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 tracing-log = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
-thiserror = "1.0"
+thiserror = "2.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
 
 [profile.release]
